@@ -1,0 +1,261 @@
+# Discord bot configuration.
+# Only one server should connect to Discord when network mode is enabled.
+discord:
+  # Your bot token from Discord Developer Portal
+  token: "PUT_BOT_TOKEN_HERE"
+  
+  # Discord server ID used for slash commands and booster role checks.
+  # Leave empty for global slash commands only if booster rewards are disabled.
+  command-guild-id: ""
+  
+  # Discord server invite link
+  invite-url: "https://discord.gg/example"
+
+# Optional Discord /ip command for showing your Minecraft server address.
+# This creates a Discord slash command named /ip only when enabled is true.
+# If you change enabled, restart the plugin/server so Discord slash commands sync again.
+server-ip:
+  # false = do not register /ip, true = register /ip on the Discord bot.
+  enabled: false
+
+  # The exact text players should use to connect to your server.
+  # Examples: "play.example.net", "example.net:25565", or "bedrock.example.net:19132"
+  ip: "yourserverip.example"
+
+# Network mode configuration.
+# Enable this when the same plugin is installed on multiple gamemode servers.
+# All servers must use the same MySQL database to share links, profiles,
+# leaderboards, booster state, and queued cross-server chat relay messages.
+network:
+  # Enable shared-network mode (multiple servers, one shared database)
+  enabled: false
+
+  # Unique gamemode id for this server instance.
+  # Use lowercase short names such as hub, lifesteal, or boxpvp.
+  gamemode-id: "hub"
+
+  # Only one server should run the Discord bot listener with the shared token.
+  # Set true on your main/primary server and false on every secondary gamemode.
+  primary-discord-node: true
+
+  # Cross-server sync cadence for profile/leaderboard snapshots used by Discord commands.
+  # Lower values update faster; higher values reduce database writes.
+  sync:
+    interval-seconds: 30
+    # Cache resolved profile cards before writing them again.
+    # Helps expensive PlaceholderAPI stats avoid recalculating for every player every sync.
+    # Set 0 to disable.
+    profile-cache-seconds: 300
+
+  # MySQL/MariaDB connection shared by all gamemode servers.
+  # Aiven users should normally set use-ssl to true.
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    database: "fodiscordbot"
+    username: "root"
+    password: "change-me"
+    use-ssl: false
+    # Max MySQL connections used by this server. Raise this if many online
+    # players sync profiles/advancements at the same time.
+    pool-size: 8
+    # How long a database operation may wait for a free connection.
+    connection-timeout-seconds: 30
+
+# Chat bridge - syncs Minecraft chat with Discord.
+# In network mode, secondary servers queue messages in MySQL and the primary
+# Discord node sends them, so only one bot connection is needed.
+chat-bridge:
+  # Discord channel ID where Minecraft messages will be sent
+  channel-id: ""
+  
+  # Name that appears when sending messages to Discord
+  webhook-name: "FoDiscordBot Chat"
+
+  # Webhook username format for Minecraft -> Discord relay.
+  # Available placeholders: {player_name}, {gamemode}
+  relay-name-format: "[{gamemode}] {player_name}"
+  
+  # URL template for player avatars.
+  # Supports {player_uuid}, {player_name}, {skin_texture_url}, and {skin_texture_hash}.
+  # Offline-mode servers use live Paper/SkinsRestorer skin texture data when available,
+  # then fall back to this template. With the default template, offline-mode fallback
+  # resolves by player name instead of the offline UUID.
+  avatar-url-template: "https://visage.surgeplay.com/bust/160/{player_uuid}"
+
+# Account linking system configuration.
+# In network mode, links are global: one Minecraft account can only link once
+# across the entire network, no matter which gamemode they run /link on.
+linking:
+  # Length of generated link codes (4-12 characters)
+  code-length: 6
+  
+  # How long link codes are valid (in seconds)
+  code-expiry-seconds: 600
+  
+  # Cooldown for /link command in Minecraft (in seconds)
+  ingame-command-cooldown-seconds: 30
+  
+  # Cooldown for /link command in Discord (in seconds)
+  discord-command-cooldown-seconds: 3
+  
+  # How often to clean up expired data (in minutes)
+  cleanup-interval-minutes: 5
+
+  # Delete the user's Discord message after a successful raw-message link.
+  # Example: if someone types "/link ABC123" in a Discord channel and linking succeeds,
+  # that user message will be removed so the code is not left visible in chat.
+  # This only affects raw Discord messages. Discord slash command /link replies are private already.
+  # The bot needs the "Manage Messages" permission in the channel to delete user messages.
+  remove-link-message-after-success: false
+
+  # Discord role to add when a Discord account successfully links to Minecraft.
+  # The same role is removed again when the player runs /unlink.
+  # Set this to a Discord role ID, for example "123456789012345678".
+  # Set this to "none" to disable linked-role adding/removal completely.
+  # The bot needs the "Manage Roles" permission in Discord.
+  # The bot's highest Discord role must be above this role, or Discord will reject it.
+  linked-role-id: "none"
+  
+  # Commands to run every time a Discord account becomes linked on this gamemode.
+  # These can run again after the Discord account unlinks and links another Minecraft account.
+  # Supports placeholders: %player_name%, %player_uuid%, %discord_id%,
+  # %discord_name%, %discord_display_name%, %gamemode%
+  always-reward-commands:
+    - "lp user %player_name% permission set linked.discord true"
+
+  # Commands to run once per Discord user ID on this gamemode.
+  # Use /fodiscordbotadmin resetrewards linked to let the Discord account claim these again.
+  one-time-reward-commands:
+    - "give %player_name% diamond 3"
+
+  # Commands to run when a linked account is unlinked.
+  unlink-commands:
+    - "lp user %player_name% permission unset linked.discord"
+
+# Discord booster rewards.
+# Checked when a player joins. If their linked Discord account has role-id,
+# always-reward-commands run when that boosted link becomes active, even if
+# one-time rewards were already claimed. one-time-reward-commands run once per
+# Discord user ID. removal-commands run when a previously active boosted link is
+# no longer active because the role was lost, the account was unlinked, or the
+# player linked a non-boosting Discord account.
+booster:
+  # Master toggle for booster role checks and booster rewards.
+  enabled: false
+
+  # Discord role ID to check in discord.command-guild-id.
+  role-id: ""
+
+  # Commands to run when a boosted Discord link becomes active.
+  # These can run again after the player unlinks and later links a booster account.
+  # Supports placeholders: %player_name%, %player_uuid%, %discord_id%,
+  # %discord_name%, %discord_display_name%, %gamemode%
+  always-reward-commands:
+    - "lp user %player_name% permission settemp booster.active true 30d"
+
+  # Commands to run once per Discord user ID when that Discord account boosts.
+  one-time-reward-commands:
+    - "give %player_name% diamond 1"
+
+  # Commands to run when the player previously had the booster role but does not anymore.
+  # This is checked on join after role loss, unlink, or linking a non-booster account.
+  removal-commands:
+    - "lp user %player_name% permission unset booster.active"
+
+# Minecraft rank to Discord role sync.
+# Checked only when a linked player joins the Minecraft server.
+# If the player has one of the configured permissions, the matching Discord role is added.
+# This feature only adds Discord roles. It does not remove roles if the permission is gone.
+# The player must already be linked with /link for the plugin to know their Discord account.
+rank-sync:
+  # Master toggle for syncing Minecraft rank permissions to Discord roles.
+  enabled: false
+
+  # Add as many ranks as you want. The section name is only a label.
+  # The bot needs the "Manage Roles" permission in Discord.
+  # The bot's highest Discord role must be above every role-id listed here.
+  # "permission" should be the permission your rank plugin gives to that rank.
+  # "role-id" should be the Discord role ID to give when the player has that permission.
+  # If a player has multiple configured permissions, all matching Discord roles are added.
+  ranks:
+    vip:
+      # Minecraft permission to check with player.hasPermission("rank.vip").
+      permission: "rank.vip"
+
+      # Discord role ID to add when the player has the permission above.
+      role-id: ""
+    mvp:
+      # Minecraft permission to check with player.hasPermission("rank.mvp").
+      permission: "rank.mvp"
+
+      # Discord role ID to add when the player has the permission above.
+      role-id: ""
+
+# FoAdvancements Discord integration.
+# This registers /advancements and syncs FoAdvancements snapshots in network mode.
+# Keep disabled unless FoAdvancements is installed on the gamemode servers that should publish progress.
+advancement:
+  # Master toggle for FoAdvancements Discord lookup and network sync.
+  enabled: false
+
+# Profile card configuration - displayed by /profile <target> <gamemode> in Discord.
+# In network mode each gamemode publishes its own profile snapshot to MySQL.
+profile:
+  # Color of the embed (hex format)
+  embed-color: "#03fc88"
+  
+  # Footer text - supports placeholders like {player_uuid}, {player_name}
+  footer: "{player_uuid}"
+  
+  # Profile fields that appear in the embed
+  fields:
+    # Discord account linking status
+    - name: ":link: Linked Discord"
+      value: "{linked_discord}"  # Shows @username if linked, "Not linked" if not
+      inline: false  # true = side-by-side, false = full width
+      same-line: false  # true = "Name: Value" on same line, false = Name and Value separate
+    
+    # Player online/offline status  
+    - name: ":triangular_flag_on_post: Status"
+      value: "{online_status}"   # Shows "Online" or "Offline"
+      inline: false
+      same-line: true  # Will show as ":triangular_flag_on_post: Status: `Online`"
+    
+    # Player kill count (requires PlaceholderAPI if you want this placeholder resolved)
+    - name: ":hammer: Kills"
+      value: "%statistic_player_kills%"  # PlaceholderAPI statistic
+      inline: false
+      same-line: true  # Will show as ":hammer: Kills: `42`"
+
+# Leaderboard configuration - displayed by /leaderboard <gamemode> <board> in Discord.
+# In network mode each gamemode publishes its configured boards to MySQL for autocomplete.
+# Each leaderboard now uses plain PlaceholderAPI strings when PlaceholderAPI is installed.
+# Older ajLeaderboards-style board configs are migrated automatically on reload/startup.
+leaderboards:
+  # Color of leaderboard embeds (hex format)
+  embed-color: "#03fc88"
+  
+  # Define different leaderboard types
+  boards:
+    kills:
+      # Title displayed in Discord
+      title: "Top Kills"
+
+      # Footer shown on this leaderboard embed.
+      # Set to "none" to hide the footer completely.
+      footer: "none"
+      
+      # Each line is sent through PlaceholderAPI as-is.
+      # This example uses ajLeaderboards placeholders, but any PlaceholderAPI leaderboard
+      # expansion will work as long as it resolves to plain text.
+      # Duplicate/add/remove lines as needed for the number of entries you want to show.
+      lines:
+        - "`#1` **%ajlb_lb_statistic_player_kills_1_alltime_displayname%** - `%ajlb_lb_statistic_player_kills_1_alltime_value%`"
+        - "`#2` **%ajlb_lb_statistic_player_kills_2_alltime_displayname%** - `%ajlb_lb_statistic_player_kills_2_alltime_value%`"
+        - "`#3` **%ajlb_lb_statistic_player_kills_3_alltime_displayname%** - `%ajlb_lb_statistic_player_kills_3_alltime_value%`"
+        - "`#4` **%ajlb_lb_statistic_player_kills_4_alltime_displayname%** - `%ajlb_lb_statistic_player_kills_4_alltime_value%`"
+        - "`#5` **%ajlb_lb_statistic_player_kills_5_alltime_displayname%** - `%ajlb_lb_statistic_player_kills_5_alltime_value%`"
+      
+      # Message when no data is available
+      empty-text: "No entries found."

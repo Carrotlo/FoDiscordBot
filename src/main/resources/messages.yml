@@ -1,0 +1,201 @@
+# Message configuration. FoPluginCore owns shared style tokens and formatting.
+# Minecraft messages use {prefix}; Discord messages remain plugin-specific text.
+
+ingame:
+  # Missing permission for admin commands.
+  no-permission: "#ff5d73No permission#a7b8b0."
+
+  # Message when console tries to use player-only commands.
+  players-only: "#ff5d73Players only#a7b8b0."
+
+  # Sent immediately when a Minecraft command starts loading database/Discord data.
+  loading: "#a7b8b0Loading..."
+
+  link:
+    # Player already has a linked Discord account.
+    already-linked: "#a7b8b0Already linked."
+
+    # Link code generated successfully.
+    # Placeholders: {code}, {minutes}
+    generated: "#a7b8b0Code #03fc88{code} #a7b8b0expires in #03fc88{minutes}m#a7b8b0."
+
+    # Hover text for clickable link code.
+    copy-hover: "#03fc88Copy #a7b8b0Discord link command."
+
+    # Player is on cooldown for generating link codes.
+    # Placeholders: {seconds}
+    cooldown: "#a7b8b0Wait #03fc88{seconds}s#a7b8b0."
+
+    # Error occurred while generating link code.
+    error: "#ff5d73Failed #a7b8b0to create link code."
+
+  unlink:
+    # Successfully unlinked Discord account.
+    success: "#3ecf8eUnlinked #03fc88Discord#a7b8b0."
+
+    # No Discord account linked to unlink.
+    not-linked: "#a7b8b0Not linked."
+
+    # Error occurred while unlinking.
+    error: "#ff5d73Failed #a7b8b0to unlink."
+
+  rewards:
+    # Automatic link rewards were granted for this gamemode.
+    # Placeholders: {gamemode}
+    success: "#3ecf8eClaimed #03fc88{gamemode} #a7b8b0rewards."
+
+  booster:
+    success: "#3ecf8eEnabled #03fc88{gamemode} #a7b8b0booster."
+    removed: "#ff5d73Disabled #03fc88{gamemode} #a7b8b0booster."
+
+  discord:
+    # Discord invite command message.
+    # Placeholders: {url}
+    text: "#a7b8b0Discord #03fc88{url}"
+
+    # Hover text for Discord invite link.
+    hover: "#03fc88Open #a7b8b0Discord invite."
+
+    # Discord bot not configured.
+    not-configured: "#ff5d73Discord unavailable #a7b8b0set #03fc88discord.token#a7b8b0."
+
+  reload:
+    # Plugin reloaded successfully.
+    success: "#3ecf8eReloaded #03fc88FoDiscordBot#a7b8b0."
+
+    # Plugin reload failed.
+    error: "#ff5d73Failed #a7b8b0check console."
+
+    # Incorrect command usage.
+    usage: "#a7b8b0Use #03fc88/fodiscordbotadmin <version|reload|editor|resetrewards|resetleaderboards>#a7b8b0."
+
+  version:
+    author: "#a7b8b0Author #03fc88{author}#a7b8b0."
+    current: "#a7b8b0Plugin version #03fc88{version}#a7b8b0."
+
+  reset-rewards:
+    usage: "#a7b8b0Use #03fc88/fodiscordbotadmin resetrewards <linked|booster> <player|discord|all> [gamemode]#a7b8b0."
+    players-only-all: "#ff5d73Players only #a7b8b0for all reset confirmation."
+    unknown-player: "#ff5d73Target not found #03fc88{player}#a7b8b0."
+    confirm-open: "#a7b8b0Confirm reward reset in GUI."
+    cancelled: "#a7b8b0Cancelled reward reset."
+    success: "#3ecf8eReset #03fc88{type} #a7b8b0rewards for #03fc88{target} #a7b8b0in #03fc88{gamemode}#a7b8b0. Rows: #03fc88{rows}#a7b8b0."
+    error: "#ff5d73Failed #a7b8b0to reset reward claims."
+
+  reset-leaderboards:
+    usage: "#a7b8b0Use #03fc88/fodiscordbotadmin resetleaderboards <gamemode|all> [board|all]#a7b8b0."
+    network-disabled: "#ff5d73Network leaderboards disabled#a7b8b0."
+    players-only-all: "#ff5d73Players only #a7b8b0for all leaderboard reset confirmation."
+    confirm-open: "#a7b8b0Confirm leaderboard reset in GUI."
+    cancelled: "#a7b8b0Cancelled leaderboard reset."
+    success: "#3ecf8eReset #03fc88{scope}#a7b8b0. Rows: #03fc88{rows}#a7b8b0."
+    error: "#ff5d73Failed #a7b8b0to reset leaderboard data."
+
+  editor:
+    # Config editor opened successfully.
+    open: "#3ecf8eOpened #03fc88editor#a7b8b0."
+
+    # Config change saved successfully.
+    saved: "#3ecf8eSaved #03fc88config#a7b8b0."
+
+    # Error saving config change.
+    save-error: "#ff5d73Failed #a7b8b0to save config."
+
+    # User cancelled config editor input.
+    input-cancelled: "#a7b8b0Cancelled."
+
+    # User entered empty value when not allowed.
+    input-empty: "#ff5d73Invalid #a7b8b0empty value."
+
+    # User entered invalid number/format.
+    invalid-input: "#ff5d73Invalid #a7b8b0input format."
+
+    # User confirmed a delete action.
+    deleted: "#3ecf8eDeleted #03fc88{target}#a7b8b0."
+
+    # User entered invalid color format.
+    invalid-color: "#ff5d73Invalid #a7b8b0use #03fc88#RRGGBB#a7b8b0."
+
+  chat-bridge:
+    # Format for Discord messages appearing in Minecraft chat.
+    # Placeholders: {discord_name}, {message}
+    format: "#03fc88Discord &8» #03fc88{discord_name} &8» #a7b8b0{message}"
+
+discord:
+  # Generic error message for Discord commands.
+  generic-error: "Something went wrong while handling that command."
+
+  # Discord command cooldown message.
+  # Placeholders: {seconds}
+  cooldown: "Slow down. Try again in `{seconds}` seconds."
+
+  ip:
+    # Message sent by /ip when server-ip.enabled is true.
+    # Placeholders: {ip}
+    text: "Server IP: `{ip}`"
+
+    # Fallback if Discord still has an old /ip command cached while disabled.
+    disabled: "The server IP command is disabled."
+
+  link:
+    # Successfully linked accounts.
+    # Placeholders: {player_name}, {discord_mention}
+    success: "Linked `{player_name}` to {discord_mention}."
+
+    # Invalid link code provided.
+    invalid-code: "That link code is invalid."
+
+    # Link code has expired.
+    expired-code: "That link code has expired. Generate a new one in-game."
+
+    # Discord account already linked to another Minecraft account.
+    discord-already-linked: "That Discord account is already linked to another Minecraft account."
+
+    # Minecraft account already linked to another Discord account.
+    player-already-linked: "That Minecraft account is already linked."
+
+  unlink:
+    # Successfully unlinked Discord account from Minecraft account.
+    # Placeholders: {player_name}, {discord_mention}
+    success: "Unlinked {discord_mention} from `{player_name}`."
+
+    # Discord user has no linked Minecraft account.
+    not-linked: "Your Discord account is not linked to a Minecraft account."
+
+  profile:
+    # Player not found for profile lookup.
+    not-found: "I couldn't find that player or linked Discord account."
+
+    # Unknown gamemode id.
+    unknown-gamemode: "Unknown gamemode `{gamemode}`."
+
+  leaderboard:
+    # Leaderboard system unavailable.
+    unavailable: "Leaderboards are unavailable right now."
+
+    # Unknown leaderboard requested.
+    # Placeholders: {board}
+    unknown-board: "Unknown leaderboard `{board}`."
+
+    # Unknown gamemode requested.
+    unknown-gamemode: "Unknown gamemode `{gamemode}`."
+
+    # No data available for requested leaderboard.
+    no-data: "That leaderboard has no data yet."
+
+  advancements:
+    # Advancement integration is disabled in config.yml.
+    disabled: "Advancement lookups are disabled."
+
+    # FoAdvancements is not installed on the requested gamemode.
+    unavailable: "Advancements are unavailable for that gamemode right now."
+
+    # Player not found for advancement lookup.
+    not-found: "I couldn't find advancement data for that player."
+
+    # Unknown gamemode id.
+    # Placeholders: {gamemode}
+    unknown-gamemode: "Unknown gamemode `{gamemode}`."
+
+    # Button session expired.
+    expired: "That advancement view expired. Run `/advancements` again."

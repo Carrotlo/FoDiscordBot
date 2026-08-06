@@ -1,0 +1,36 @@
+name: FoDiscordBot
+version: '${project.version}'
+main: me.foesio.foDiscordBot.FoDiscordBot
+api-version: '1.21'
+authors: [ Foesio ]
+description: Discord bot integration with linking, rewards, profiles, and leaderboards
+softdepend: [ PlaceholderAPI, FoAdvancements, SkinsRestorer ]
+commands:
+  fodiscordbotadmin:
+    description: Manage FoDiscordBot
+    usage: /fodiscordbotadmin <version|reload|editor|resetrewards|resetleaderboards>
+    aliases: [ discordbotadmin, fodiscord, fodiscordbot ]
+  link:
+    description: Generate a Discord link code
+    usage: /link
+    permission: fodiscord.use
+  unlink:
+    description: Unlink your Discord account
+    usage: /unlink
+    permission: fodiscord.use
+  discord:
+    description: Show the Discord invite link
+    usage: /discord
+    permission: fodiscord.use
+permissions:
+  fodiscordbot.admin:
+    description: Reload and administrate FoDiscordBot
+    default: op
+  fodiscord.admin:
+    description: Legacy FoDiscordBot admin permission
+    default: op
+    children:
+      fodiscordbot.admin: true
+  fodiscord.use:
+    description: Use FoDiscordBot player commands
+    default: true
