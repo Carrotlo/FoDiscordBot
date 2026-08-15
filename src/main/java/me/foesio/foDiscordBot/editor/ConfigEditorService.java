@@ -17,6 +17,10 @@ import me.foesio.core.editor.EditorItemFactory;
 import me.foesio.core.gui.GuiButtonConfig;
 import me.foesio.core.gui.GuiTitles;
 import me.foesio.core.gui.GuiSlots;
+import me.foesio.core.gui.EntryBrowserClick;
+import me.foesio.core.gui.EntryBrowserHolder;
+import me.foesio.core.gui.EntryBrowserMenus;
+import me.foesio.core.gui.EntryBrowserRequest;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
 import me.foesio.core.number.LargeNumberParser;
@@ -83,6 +87,16 @@ public final class ConfigEditorService implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        if (event.getInventory().getHolder() instanceof EntryBrowserHolder entryBrowserHolder) {
+            event.setCancelled(true);
+            if (!player.hasPermission(FoDiscordBot.ADMIN_PERMISSION)) {
+                player.closeInventory();
+                plugin.messages().sendConfigured(player, "ingame.no-permission");
+                return;
+            }
+            handleEntryBrowserClick(player, event.getRawSlot(), event.getClick(), entryBrowserHolder);
             return;
         }
         if (!(event.getInventory().getHolder() instanceof EditorHolder holder)) {
@@ -899,34 +913,27 @@ public final class ConfigEditorService implements Listener {
 
     private void openRankSyncPage(Player player, int requestedPage) {
         List<String> keys = rankKeys();
-        int page = currentPage(Integer.toString(requestedPage), maxPage(keys.size()));
-        Inventory inventory = createInventory(player, EditorView.RANK_SYNC, Integer.toString(page), "Rank Sync", 54);
-        inventory.setItem(RANK_SYNC_SLOT, EditorItemFactory.toggle("Rank Sync", plugin.getConfig().getBoolean("rank-sync.enabled", false)));
+        openRankSyncBrowser(player, "", requestedPage);
+    }
 
-        ItemStack emptyEntry = emptyEntryFiller();
-        int firstEntry = page * ENTRIES_PER_PAGE;
-        for (int offset = 0; offset < PAGED_ENTRY_SLOTS.length; offset++) {
-            int index = firstEntry + offset;
-            int slot = PAGED_ENTRY_SLOTS[offset];
-            if (index >= keys.size()) {
-                inventory.setItem(slot, emptyEntry);
+    private void openRankSyncBrowser(Player player, String filter, int requestedPage) {
+        String normalized = normalizeFilter(filter);
+        List<EntryBrowserRequest.Entry> entries = new ArrayList<>();
+        for (String key : rankKeys()) {
+            if (!matchesFilter(key, normalized)) {
                 continue;
             }
-
-            String key = keys.get(index);
             String path = "rank-sync.ranks." + key;
-            inventory.setItem(slot, EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Rank " + key, List.of(
+            entries.add(EntryBrowserRequest.Entry.of(key, EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Rank " + key, List.of(
                     FoStyle.WHITE + "Permission: " + value(plugin.getConfig().getString(path + ".permission", "")),
                     FoStyle.WHITE + "Role ID: " + value(blankAsNone(plugin.getConfig().getString(path + ".role-id", ""))),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            )));
+            ))));
         }
-
-        inventory.setItem(ADD_RANK_SLOT, EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Rank", List.of(FoStyle.WHITE + "Click to type a new rank mapping.")));
-        addPageButtons(inventory, page, maxPage(keys.size()));
-        addFooter(inventory, true);
-        player.openInventory(inventory);
+        openEntryBrowser(player, new DiscordBrowserContext(EditorView.RANK_SYNC, "", EditorView.MAIN, ""), normalized, requestedPage, entries,
+                "Rank Sync", EditorItemFactory.toggle("Rank Sync", plugin.getConfig().getBoolean("rank-sync.enabled", false)),
+                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Rank", List.of(FoStyle.WHITE + "Click to type a new rank mapping.")));
     }
 
     private void openProfileFieldsPage(Player player) {
@@ -935,33 +942,31 @@ public final class ConfigEditorService implements Listener {
 
     private void openProfileFieldsPage(Player player, int requestedPage) {
         List<Map<?, ?>> fields = plugin.getConfig().getMapList("profile.fields");
-        int page = currentPage(Integer.toString(requestedPage), maxPage(fields.size()));
-        Inventory inventory = createInventory(player, EditorView.PROFILE_FIELDS, Integer.toString(page), "Profile Fields", 54);
-        ItemStack emptyEntry = emptyEntryFiller();
-        int firstEntry = page * ENTRIES_PER_PAGE;
-        for (int offset = 0; offset < PAGED_ENTRY_SLOTS.length; offset++) {
-            int index = firstEntry + offset;
-            int slot = PAGED_ENTRY_SLOTS[offset];
-            if (index >= fields.size()) {
-                inventory.setItem(slot, emptyEntry);
+        openProfileFieldsBrowser(player, "", requestedPage);
+    }
+
+    private void openProfileFieldsBrowser(Player player, String filter, int requestedPage) {
+        String normalized = normalizeFilter(filter);
+        List<EntryBrowserRequest.Entry> entries = new ArrayList<>();
+        List<Map<?, ?>> fields = plugin.getConfig().getMapList("profile.fields");
+        for (int index = 0; index < fields.size(); index++) {
+            Map<?, ?> field = fields.get(index);
+            String name = trim(String.valueOf(mapValue(field, "name", "Field")));
+            if (!matchesFilter(name, normalized)) {
                 continue;
             }
-
-            Map<?, ?> field = fields.get(index);
-            inventory.setItem(slot, EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Field #" + (index + 1), List.of(
-                    FoStyle.WHITE + "Name: " + value(trim(String.valueOf(mapValue(field, "name", "Field")))),
+            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Field #" + (index + 1), List.of(
+                    FoStyle.WHITE + "Name: " + value(name),
                     FoStyle.WHITE + "Value: " + value(trim(String.valueOf(mapValue(field, "value", "N/A")))),
                     FoStyle.WHITE + "Inline: " + (Boolean.parseBoolean(String.valueOf(mapValue(field, "inline", false))) ? FoStyle.GOOD + "Enabled" : FoStyle.BAD + "Disabled"),
                     FoStyle.WHITE + "Same line: " + (Boolean.parseBoolean(String.valueOf(mapValue(field, "same-line", false))) ? FoStyle.GOOD + "Enabled" : FoStyle.BAD + "Disabled"),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            )));
+            ))));
         }
-
-        inventory.setItem(ADD_PROFILE_FIELD_SLOT, EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Field", List.of(FoStyle.WHITE + "Click to type a new field.")));
-        addPageButtons(inventory, page, maxPage(fields.size()));
-        addFooter(inventory, true);
-        player.openInventory(inventory);
+        openEntryBrowser(player, new DiscordBrowserContext(EditorView.PROFILE_FIELDS, "", EditorView.DISCORD, ""), normalized, requestedPage, entries,
+                "Profile Fields", null,
+                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Field", List.of(FoStyle.WHITE + "Click to type a new field.")));
     }
 
     private void openLeaderboardsPage(Player player) {
@@ -970,35 +975,28 @@ public final class ConfigEditorService implements Listener {
 
     private void openLeaderboardsPage(Player player, int requestedPage) {
         List<String> aliases = leaderboardAliases();
-        int page = currentPage(Integer.toString(requestedPage), maxPage(aliases.size()));
-        Inventory inventory = createInventory(player, EditorView.LEADERBOARDS, Integer.toString(page), "Leaderboards", 54);
-        inventory.setItem(LEADERBOARD_EMBED_COLOR_SLOT, valueItem(Material.GLOW_INK_SAC, "Embed Color",
-                displayHex(plugin.getConfig().getString("leaderboards.embed-color", FoStyle.THEME)), "Click to type hex color."));
+        openLeaderboardsBrowser(player, "", requestedPage);
+    }
 
-        ItemStack emptyEntry = emptyEntryFiller();
-        int firstEntry = page * ENTRIES_PER_PAGE;
-        for (int offset = 0; offset < PAGED_ENTRY_SLOTS.length; offset++) {
-            int index = firstEntry + offset;
-            int slot = PAGED_ENTRY_SLOTS[offset];
-            if (index >= aliases.size()) {
-                inventory.setItem(slot, emptyEntry);
+    private void openLeaderboardsBrowser(Player player, String filter, int requestedPage) {
+        String normalized = normalizeFilter(filter);
+        List<EntryBrowserRequest.Entry> entries = new ArrayList<>();
+        for (String alias : leaderboardAliases()) {
+            if (!matchesFilter(alias, normalized)) {
                 continue;
             }
-
-            String alias = aliases.get(index);
             String basePath = "leaderboards.boards." + alias;
-            inventory.setItem(slot, EditorItemFactory.item(Material.OAK_SIGN, FoStyle.THEME + "Board " + alias, List.of(
+            entries.add(EntryBrowserRequest.Entry.of(alias, EditorItemFactory.item(Material.OAK_SIGN, FoStyle.THEME + "Board " + alias, List.of(
                     FoStyle.WHITE + "Title: " + value(trim(plugin.getConfig().getString(basePath + ".title", alias))),
                     FoStyle.WHITE + "Lines: " + value(plugin.getConfig().getStringList(basePath + ".lines").size()),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            )));
+            ))));
         }
-
-        inventory.setItem(ADD_BOARD_SLOT, EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Board", List.of(FoStyle.WHITE + "Click to type a new board.")));
-        addPageButtons(inventory, page, maxPage(aliases.size()));
-        addFooter(inventory, true);
-        player.openInventory(inventory);
+        openEntryBrowser(player, new DiscordBrowserContext(EditorView.LEADERBOARDS, "", EditorView.MAIN, ""), normalized, requestedPage, entries,
+                "Leaderboards", valueItem(Material.GLOW_INK_SAC, "Embed Color",
+                        displayHex(plugin.getConfig().getString("leaderboards.embed-color", FoStyle.THEME)), "Click to type hex color."),
+                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Board", List.of(FoStyle.WHITE + "Click to type a new board.")));
     }
 
     private void openBoardPage(Player player, String alias) {
@@ -1027,30 +1025,184 @@ public final class ConfigEditorService implements Listener {
 
     private void openCommandList(Player player, String path, EditorView returnView, String returnContext, int requestedPage) {
         List<String> values = plugin.getConfig().getStringList(path);
-        int page = currentPage(Integer.toString(requestedPage), maxPage(values.size()));
-        String context = encodeCommandListContext(path, returnView, returnContext, page);
-        Inventory inventory = createInventory(player, EditorView.COMMAND_LIST, context, commandListTitle(path), 54);
-        ItemStack emptyEntry = emptyEntryFiller();
-        int firstEntry = page * ENTRIES_PER_PAGE;
-        for (int offset = 0; offset < PAGED_ENTRY_SLOTS.length; offset++) {
-            int index = firstEntry + offset;
-            int slot = PAGED_ENTRY_SLOTS[offset];
-            if (index >= values.size()) {
-                inventory.setItem(slot, emptyEntry);
+        String filter = "";
+        openCommandBrowser(player, path, returnView, returnContext, filter, requestedPage);
+    }
+
+    private void openCommandBrowser(Player player, String path, EditorView returnView, String returnContext, String filter, int requestedPage) {
+        String normalized = normalizeFilter(filter);
+        List<String> values = plugin.getConfig().getStringList(path);
+        List<EntryBrowserRequest.Entry> entries = new ArrayList<>();
+        for (int index = 0; index < values.size(); index++) {
+            if (!matchesFilter(values.get(index), normalized)) {
                 continue;
             }
-
-            inventory.setItem(slot, EditorItemFactory.item(Material.PAPER, FoStyle.THEME + commandListEntryName(path) + " #" + (index + 1), List.of(
+            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.item(Material.PAPER, FoStyle.THEME + commandListEntryName(path) + " #" + (index + 1), List.of(
                     FoStyle.WHITE + trim(values.get(index)),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            )));
+            ))));
         }
+        openEntryBrowser(player, new DiscordBrowserContext(EditorView.COMMAND_LIST, path, returnView, returnContext), normalized, requestedPage, entries,
+                commandListTitle(path), null,
+                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add " + commandListEntryName(path), List.of(FoStyle.WHITE + "Click to type a new line.")));
+    }
 
-        inventory.setItem(ADD_COMMAND_SLOT, EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add " + commandListEntryName(path), List.of(FoStyle.WHITE + "Click to type a new line.")));
-        addPageButtons(inventory, page, maxPage(values.size()));
-        addFooter(inventory, true);
-        player.openInventory(inventory);
+    private void openEntryBrowser(Player player, DiscordBrowserContext context, String filter, int page,
+                                  List<EntryBrowserRequest.Entry> entries, String title, ItemStack extraButton, ItemStack addButton) {
+        EntryBrowserMenus.open(player, EntryBrowserRequest.builder()
+                .title(title)
+                .entries(entries)
+                .page(page)
+                .filter(filter)
+                .buttons(GuiButtonConfig.defaults())
+                .showBack(true)
+                .context(context)
+                .extraButton(extraButton)
+                .addButton(addButton)
+                .build());
+    }
+
+    private void handleEntryBrowserClick(Player player, int slot, ClickType clickType, EntryBrowserHolder holder) {
+        if (!(holder.request().context() instanceof DiscordBrowserContext context)) {
+            return;
+        }
+        EntryBrowserClick click = EntryBrowserMenus.handleClick(slot, holder, clickType);
+        int page = holder.request().page();
+        String filter = holder.request().filter();
+        switch (click.action()) {
+            case ENTRY -> handleEntryBrowserEntry(player, context, click, page, filter);
+            case ADD -> handleEntryBrowserAdd(player, context, page);
+            case EXTRA -> handleEntryBrowserExtra(player, context, page);
+            case BACK -> reopen(player, context.parent(), context.parentContext());
+            case SEARCH -> beginEntryBrowserSearch(player, context, page, filter);
+            case CLEAR_SEARCH -> openEntryBrowserForContext(player, context, "", 0);
+            case PREVIOUS_PAGE -> openEntryBrowserForContext(player, context, filter, page - 1);
+            case NEXT_PAGE -> openEntryBrowserForContext(player, context, filter, page + 1);
+            case NONE -> {
+            }
+        }
+    }
+
+    private void handleEntryBrowserEntry(Player player, DiscordBrowserContext context, EntryBrowserClick click, int page, String filter) {
+        String entryId = click.entryId();
+        if (context.view() == EditorView.RANK_SYNC) {
+            if (click.clickType() != null && click.clickType().isRightClick()) {
+                openConfirmDelete(player, DeleteRequest.configPath(EditorView.RANK_SYNC, String.valueOf(page), "rank-sync.ranks." + entryId, "rank " + entryId));
+            } else {
+                beginTextInput(player, PendingInputType.EDIT_RANK, -1, EditorView.RANK_SYNC, String.valueOf(page), "", "rank mapping " + entryId, "key | permission | role-id", entryId);
+            }
+            return;
+        }
+        if (context.view() == EditorView.PROFILE_FIELDS) {
+            int index = parseIndex(entryId);
+            if (index < 0) {
+                return;
+            }
+            if (click.clickType() != null && click.clickType().isRightClick()) {
+                openConfirmDelete(player, DeleteRequest.listIndex(EditorView.PROFILE_FIELDS, String.valueOf(page), "profile.fields", index, "profile field #" + (index + 1)));
+            } else {
+                beginTextInput(player, PendingInputType.EDIT_PROFILE_FIELD, index, EditorView.PROFILE_FIELDS, String.valueOf(page), "", "profile field #" + (index + 1), "name | value | inline true/false | same-line true/false");
+            }
+            return;
+        }
+        if (context.view() == EditorView.LEADERBOARDS) {
+            if (click.clickType() != null && click.clickType().isRightClick()) {
+                openConfirmDelete(player, DeleteRequest.configPath(EditorView.LEADERBOARDS, String.valueOf(page), "leaderboards.boards." + entryId, "board " + entryId));
+            } else {
+                openBoardPage(player, entryId);
+            }
+            return;
+        }
+        if (context.view() == EditorView.COMMAND_LIST) {
+            int index = parseIndex(entryId);
+            String encoded = encodeCommandListContext(context.path(), context.parent(), context.parentContext(), page);
+            if (index < 0) {
+                return;
+            }
+            if (click.clickType() != null && click.clickType().isRightClick()) {
+                openConfirmDelete(player, DeleteRequest.listIndex(EditorView.COMMAND_LIST, encoded, context.path(), index, commandListEntryName(context.path()) + " #" + (index + 1)));
+            } else {
+                beginTextInput(player, PendingInputType.EDIT_COMMAND, index, EditorView.COMMAND_LIST, encoded, context.path(), commandListEntryName(context.path()) + " #" + (index + 1), "plain text line");
+            }
+        }
+    }
+
+    private void handleEntryBrowserExtra(Player player, DiscordBrowserContext context, int page) {
+        if (context.view() == EditorView.RANK_SYNC) {
+            toggleBoolean(player, "rank-sync.enabled", EditorView.RANK_SYNC, String.valueOf(page));
+        } else if (context.view() == EditorView.LEADERBOARDS) {
+            beginTextInput(player, PendingInputType.SET_HEX, -1, EditorView.LEADERBOARDS, String.valueOf(page),
+                    "leaderboards.embed-color", "leaderboard embed color", "#RRGGBB");
+        }
+    }
+
+    private void handleEntryBrowserAdd(Player player, DiscordBrowserContext context, int page) {
+        String pageContext = String.valueOf(page);
+        switch (context.view()) {
+            case RANK_SYNC -> beginTextInput(player, PendingInputType.ADD_RANK, -1, EditorView.RANK_SYNC, pageContext, "", "rank mapping", "key | permission | role-id");
+            case PROFILE_FIELDS -> beginTextInput(player, PendingInputType.ADD_PROFILE_FIELD, -1, EditorView.PROFILE_FIELDS, pageContext, "", "profile field", "name | value | inline true/false | same-line true/false");
+            case LEADERBOARDS -> beginTextInput(player, PendingInputType.ADD_BOARD, -1, EditorView.LEADERBOARDS, pageContext, "", "leaderboard board", "alias | title");
+            case COMMAND_LIST -> {
+                String encoded = encodeCommandListContext(context.path(), context.parent(), context.parentContext(), page);
+                beginTextInput(player, PendingInputType.ADD_COMMAND, -1, EditorView.COMMAND_LIST, encoded, context.path(), commandListEntryName(context.path()), "plain text line");
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void beginEntryBrowserSearch(Player player, DiscordBrowserContext context, int page, String filter) {
+        TextDialogRequest request = new TextDialogRequest(
+                "Search",
+                List.of(FoStyle.WHITE + "Filter entries by name or value."),
+                "Search",
+                filter,
+                "entry text",
+                DialogButton.search("Search", "", 100),
+                DialogButton.cancel("Back", "", 100),
+                320,
+                300,
+                64,
+                true,
+                true,
+                false
+        );
+        EditorDialogInputs.openTextFromInventory(
+                plugin,
+                plugin.getCore().inventoryCloseSuppressor(),
+                plugin.getCore().dialogService(),
+                player,
+                request,
+                value -> openEntryBrowserForContext(player, context, normalizeFilter(value), 0),
+                () -> openEntryBrowserForContext(player, context, filter, page)
+        );
+    }
+
+    private void openEntryBrowserForContext(Player player, DiscordBrowserContext context, String filter, int page) {
+        switch (context.view()) {
+            case RANK_SYNC -> openRankSyncBrowser(player, filter, page);
+            case PROFILE_FIELDS -> openProfileFieldsBrowser(player, filter, page);
+            case LEADERBOARDS -> openLeaderboardsBrowser(player, filter, page);
+            case COMMAND_LIST -> openCommandBrowser(player, context.path(), context.parent(), context.parentContext(), filter, page);
+            default -> reopen(player, context.parent(), context.parentContext());
+        }
+    }
+
+    private int parseIndex(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            return -1;
+        }
+    }
+
+    private String normalizeFilter(String filter) {
+        return filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean matchesFilter(String value, String filter) {
+        return filter == null || filter.isBlank() || value.toLowerCase(Locale.ROOT).contains(filter);
     }
 
     private void reopenCommandList(Player player, String encodedContext) {
@@ -1285,7 +1437,7 @@ public final class ConfigEditorService implements Listener {
         if (section == null) {
             return List.of();
         }
-        return new ArrayList<>(section.getKeys(false));
+        return section.getKeys(false).stream().sorted(String.CASE_INSENSITIVE_ORDER).toList();
     }
 
     private List<String> leaderboardAliases() {
@@ -1293,7 +1445,7 @@ public final class ConfigEditorService implements Listener {
         if (section == null) {
             return List.of();
         }
-        return new ArrayList<>(section.getKeys(false));
+        return section.getKeys(false).stream().sorted(String.CASE_INSENSITIVE_ORDER).toList();
     }
 
     private String commandListTitle(String path) {
@@ -1436,6 +1588,9 @@ public final class ConfigEditorService implements Listener {
     }
 
     private record CommandListContext(String path, EditorView returnView, String returnContext, int page) {
+    }
+
+    private record DiscordBrowserContext(EditorView view, String path, EditorView parent, String parentContext) {
     }
 
     private static final class EditorHolder implements InventoryHolder {
