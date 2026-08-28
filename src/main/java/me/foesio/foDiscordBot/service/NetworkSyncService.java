@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import me.foesio.core.number.TickDuration;
+import me.foesio.foDiscordBot.api.FoDiscordBotAddon;
 import me.foesio.foDiscordBot.FoDiscordBot;
 import me.foesio.foDiscordBot.util.CoreRepeatingTask;
 import org.bukkit.entity.Player;
@@ -14,7 +15,6 @@ public final class NetworkSyncService {
     private final FoDiscordBot plugin;
     private final ProfileService profileService;
     private final LeaderboardService leaderboardService;
-    private final AdvancementService advancementService;
     private final AtomicBoolean cycleRunning = new AtomicBoolean(false);
 
     private CoreRepeatingTask periodicTask;
@@ -22,13 +22,11 @@ public final class NetworkSyncService {
     public NetworkSyncService(
             FoDiscordBot plugin,
             ProfileService profileService,
-            LeaderboardService leaderboardService,
-            AdvancementService advancementService
+            LeaderboardService leaderboardService
     ) {
         this.plugin = plugin;
         this.profileService = profileService;
         this.leaderboardService = leaderboardService;
-        this.advancementService = advancementService;
     }
 
     public void start() {
@@ -57,7 +55,6 @@ public final class NetworkSyncService {
             return;
         }
 
-        UUID playerUuid = player.getUniqueId();
         String playerName = player.getName();
         profileService.syncPlayerProfileSnapshot(player)
                 .handle((ignored, throwable) -> {
@@ -66,11 +63,9 @@ public final class NetworkSyncService {
                     }
                     return null;
                 })
-                .thenCompose(ignored -> plugin.getPluginConfig().advancementEnabled()
-                        ? advancementService.syncPlayerNow(playerUuid, playerName)
-                        : CompletableFuture.completedFuture(null))
+                .thenCompose(ignored -> syncAddonPlayer(player))
                 .exceptionally(throwable -> {
-                    plugin.logWarning("Failed to sync advancement snapshot for " + playerName + ": " + throwable.getMessage());
+                    plugin.logWarning("Failed to sync addon data for " + playerName + ": " + throwable.getMessage());
                     return null;
                 });
     }
@@ -98,9 +93,7 @@ public final class NetworkSyncService {
 
         runSyncStep("leaderboard snapshots", leaderboardService::syncLocalLeaderboardsToNetwork)
                 .thenCompose(ignored -> runSyncStep("profile snapshots", profileService::syncOnlineProfileSnapshots))
-                .thenCompose(ignored -> plugin.getPluginConfig().advancementEnabled()
-                        ? runSyncStep("advancement snapshots", advancementService::syncOnlinePlayersToNetwork)
-                        : CompletableFuture.completedFuture(null))
+                .thenCompose(ignored -> syncAddonNetwork())
                 .whenComplete((ignored, throwable) -> {
                     cycleRunning.set(false);
                     if (throwable != null) {
@@ -119,5 +112,27 @@ public final class NetworkSyncService {
             plugin.logWarning("Failed to sync " + name + ": " + exception.getMessage());
             return CompletableFuture.completedFuture(null);
         }
+    }
+
+    private CompletableFuture<Void> syncAddonPlayer(Player player) {
+        CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
+        for (FoDiscordBotAddon addon : plugin.getAddons()) {
+            result = result.thenCompose(ignored -> runSyncStep(
+                    addon.id() + " player data",
+                    () -> addon.syncPlayerNow(player)
+            ));
+        }
+        return result;
+    }
+
+    private CompletableFuture<Void> syncAddonNetwork() {
+        CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
+        for (FoDiscordBotAddon addon : plugin.getAddons()) {
+            result = result.thenCompose(ignored -> runSyncStep(
+                    addon.id() + " network data",
+                    addon::syncOnlinePlayersToNetwork
+            ));
+        }
+        return result;
     }
 }

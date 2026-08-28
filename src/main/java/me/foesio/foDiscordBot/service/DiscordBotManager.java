@@ -22,9 +22,7 @@ import me.foesio.core.discord.DiscordWebhookSettings;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.number.LargeNumberParser;
 import me.foesio.foDiscordBot.FoDiscordBot;
-import me.foesio.foDiscordBot.model.AdvancementEntryView;
-import me.foesio.foDiscordBot.model.AdvancementProfileView;
-import me.foesio.foDiscordBot.model.AdvancementTabView;
+import me.foesio.foDiscordBot.api.FoDiscordBotAddon;
 import me.foesio.foDiscordBot.model.LeaderboardView;
 import me.foesio.foDiscordBot.model.ProfileCard;
 import me.foesio.foDiscordBot.model.ProfileField;
@@ -59,21 +57,11 @@ public final class DiscordBotManager extends ListenerAdapter {
     private static final String RAW_LINK_PREFIX = "/link ";
     private static final int DISCORD_MESSAGE_LIMIT = 2_000;
     private static final int MINECRAFT_MESSAGE_LIMIT = 256;
-    private static final int ADVANCEMENT_COLOR = 0x03fc88;
-    private static final int MAX_ADVANCEMENT_FIELDS = 12;
-    private static final int MAX_ADVANCEMENT_TAB_BUTTONS = 20;
-    private static final int DISCORD_BUTTONS_PER_ROW = 5;
-    private static final int ADVANCEMENT_PROGRESS_BAR_SEGMENTS = 10;
-    private static final Duration ADVANCEMENT_SESSION_TTL = Duration.ofMinutes(15);
-    private static final String ADVANCEMENT_CUSTOM_ID_PREFIX = "adv:";
-
     private final FoDiscordBot plugin;
     private final LinkService linkService;
     private final ProfileService profileService;
     private final LeaderboardService leaderboardService;
-    private final AdvancementService advancementService;
     private final Map<String, Instant> interactionCooldowns = new ConcurrentHashMap<>();
-    private final Map<String, AdvancementSession> advancementSessions = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<String>> relayWebhookUrls = new ConcurrentHashMap<>();
     private final Set<String> relayWarnings = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean relayQueueDrainRunning = new AtomicBoolean(false);
@@ -85,14 +73,12 @@ public final class DiscordBotManager extends ListenerAdapter {
             FoDiscordBot plugin,
             LinkService linkService,
             ProfileService profileService,
-            LeaderboardService leaderboardService,
-            AdvancementService advancementService
+            LeaderboardService leaderboardService
     ) {
         this.plugin = plugin;
         this.linkService = linkService;
         this.profileService = profileService;
         this.leaderboardService = leaderboardService;
-        this.advancementService = advancementService;
     }
 
     public synchronized void startAsync() {
@@ -127,7 +113,6 @@ public final class DiscordBotManager extends ListenerAdapter {
     public synchronized void shutdown() {
         JDA active = jda;
         jda = null;
-        advancementSessions.clear();
         relayWebhookUrls.clear();
         relayWarnings.clear();
         if (relayQueueTask != null) {
@@ -165,16 +150,12 @@ public final class DiscordBotManager extends ListenerAdapter {
             case "ip" -> handleIp(event);
             case "profile" -> handleProfile(event);
             case "leaderboard" -> handleLeaderboard(event);
-            case "advancements" -> {
-                if (advancementService.discordAvailable()) {
-                    handleAdvancements(event);
-                } else {
-                    event.reply(plugin.messages().renderConfigured("discord.advancements.disabled"))
-                            .setEphemeral(true)
-                            .queue();
-                }
-            }
             default -> {
+                for (FoDiscordBotAddon addon : plugin.getAddons()) {
+                    if (addon.handleSlashCommand(event)) {
+                        return;
+                    }
+                }
             }
         }
     }
@@ -183,22 +164,12 @@ public final class DiscordBotManager extends ListenerAdapter {
     public void onCommandAutoCompleteInteraction(@NotNull CommandAutoCompleteInteractionEvent event) {
         String commandName = event.getName();
         String focused = event.getFocusedOption().getName();
-        if (!"profile".equals(commandName) && !"leaderboard".equals(commandName) && !"advancements".equals(commandName)) {
-            return;
+        for (FoDiscordBotAddon addon : plugin.getAddons()) {
+            if (addon.handleAutocomplete(event)) {
+                return;
+            }
         }
-
-        if ("advancements".equals(commandName)) {
-            if (!advancementService.discordAvailable()) {
-                event.replyChoices(List.of()).queue();
-                return;
-            }
-            if ("gamemode".equals(focused)) {
-                handleAdvancementGamemodeAutocomplete(event);
-                return;
-            }
-            if ("player".equals(focused)) {
-                handleAdvancementPlayerAutocomplete(event);
-            }
+        if (!"profile".equals(commandName) && !"leaderboard".equals(commandName)) {
             return;
         }
 
@@ -214,18 +185,11 @@ public final class DiscordBotManager extends ListenerAdapter {
 
     @Override
     public void onButtonInteraction(@NotNull ButtonInteractionEvent event) {
-        String customId = event.getComponentId();
-        if (customId == null || !customId.startsWith(ADVANCEMENT_CUSTOM_ID_PREFIX)) {
-            return;
+        for (FoDiscordBotAddon addon : plugin.getAddons()) {
+            if (addon.handleButton(event)) {
+                return;
+            }
         }
-        if (!advancementService.discordAvailable()) {
-            event.reply(plugin.messages().renderConfigured("discord.advancements.disabled"))
-                    .setEphemeral(true)
-                    .queue();
-            return;
-        }
-
-        handleAdvancementButton(event, customId);
     }
 
     @Override
@@ -424,44 +388,6 @@ public final class DiscordBotManager extends ListenerAdapter {
         });
     }
 
-    private void handleAdvancements(SlashCommandInteractionEvent event) {
-        Duration remaining = checkInteractionCooldown(event.getUser().getId());
-        if (!remaining.isZero() && !remaining.isNegative()) {
-            event.reply(plugin.messages().render("discord.cooldown",
-                    FoMessageService.missingMessageFallback("discord.cooldown"), Map.of(
-                    "seconds", String.valueOf(Math.max(1L, remaining.toSeconds()))
-            ))).setEphemeral(true).queue();
-            return;
-        }
-
-        String gamemode = event.getOption("gamemode") != null ? event.getOption("gamemode").getAsString() : "";
-        String player = event.getOption("player") != null ? event.getOption("player").getAsString() : "";
-        event.deferReply(false).queue();
-        advancementService.buildAdvancements(gamemode, player).whenComplete((response, throwable) -> {
-            if (throwable != null) {
-                event.getHook().editOriginal(plugin.messages().renderConfigured("discord.generic-error")).queue();
-                return;
-            }
-
-            switch (response.status()) {
-                case SUCCESS -> {
-                    String token = createAdvancementSession(response.profile());
-                    event.getHook().editOriginalEmbeds(createAdvancementEmbed(response.profile(), 0))
-                            .setContent("")
-                            .setComponents(createAdvancementComponents(token, response.profile(), 0))
-                            .setAllowedMentions(Collections.emptyList())
-                            .queue();
-                }
-                case UNKNOWN_GAMEMODE -> event.getHook().editOriginal(plugin.messages().render("discord.advancements.unknown-gamemode",
-                        FoMessageService.missingMessageFallback("discord.advancements.unknown-gamemode"), Map.of(
-                        "gamemode", gamemode
-                ))).queue();
-                case UNAVAILABLE -> event.getHook().editOriginal(plugin.messages().renderConfigured("discord.advancements.unavailable")).queue();
-                case NOT_FOUND -> event.getHook().editOriginal(plugin.messages().renderConfigured("discord.advancements.not-found")).queue();
-            }
-        });
-    }
-
     private void handleGamemodeAutocomplete(CommandAutoCompleteInteractionEvent event) {
         String focused = normalize(event.getFocusedOption().getValue());
         leaderboardService.listAvailableGamemodes().whenComplete((gamemodes, throwable) -> {
@@ -483,60 +409,6 @@ public final class DiscordBotManager extends ListenerAdapter {
             }
             event.replyChoices(toChoices(boards, focused)).queue();
         });
-    }
-
-    private void handleAdvancementGamemodeAutocomplete(CommandAutoCompleteInteractionEvent event) {
-        String focused = normalize(event.getFocusedOption().getValue());
-        advancementService.listAdvancementGamemodes().whenComplete((gamemodes, throwable) -> {
-            if (throwable != null) {
-                event.replyChoices(List.of()).queue();
-                return;
-            }
-            event.replyChoices(toChoices(gamemodes, focused)).queue();
-        });
-    }
-
-    private void handleAdvancementPlayerAutocomplete(CommandAutoCompleteInteractionEvent event) {
-        String gamemode = event.getOption("gamemode") != null ? event.getOption("gamemode").getAsString() : "";
-        String focused = event.getFocusedOption().getValue();
-        advancementService.listAdvancementPlayers(gamemode, focused).whenComplete((players, throwable) -> {
-            if (throwable != null) {
-                event.replyChoices(List.of()).queue();
-                return;
-            }
-            event.replyChoices(toChoices(players, normalize(focused))).queue();
-        });
-    }
-
-    private void handleAdvancementButton(ButtonInteractionEvent event, String customId) {
-        cleanupExpiredAdvancementSessions();
-
-        String[] parts = customId.split(":");
-        if (parts.length < 3) {
-            event.reply(plugin.messages().renderConfigured("discord.advancements.expired"))
-                    .setEphemeral(true)
-                    .queue();
-            return;
-        }
-
-        String token = parts[1];
-        AdvancementSession session = advancementSessions.get(token);
-        if (session == null || session.expired()) {
-            advancementSessions.remove(token);
-            event.reply(plugin.messages().renderConfigured("discord.advancements.expired"))
-                    .setEphemeral(true)
-                    .queue();
-            return;
-        }
-
-        int page = parsePage(parts[parts.length - 1]);
-        AdvancementProfileView profile = session.profile();
-        page = clampPage(profile, page);
-        advancementSessions.put(token, new AdvancementSession(profile, Instant.now().plus(ADVANCEMENT_SESSION_TTL)));
-        event.editMessageEmbeds(createAdvancementEmbed(profile, page))
-                .setComponents(createAdvancementComponents(token, profile, page))
-                .setAllowedMentions(Collections.emptyList())
-                .queue();
     }
 
     private List<Command.Choice> toChoices(List<String> values, String focusedLower) {
@@ -598,10 +470,8 @@ public final class DiscordBotManager extends ListenerAdapter {
         commands.add(Commands.slash("leaderboard", "Show a configured leaderboard board for a gamemode")
                 .addOption(OptionType.STRING, "gamemode", "Gamemode id", true, true)
                 .addOption(OptionType.STRING, "board", "The configured board alias", true, true));
-        if (advancementService.discordAvailable()) {
-            commands.add(Commands.slash("advancements", "Show a player's FoAdvancements progress")
-                    .addOption(OptionType.STRING, "gamemode", "Gamemode id", true, true)
-                    .addOption(OptionType.STRING, "player", "Minecraft player name or UUID", true, true));
+        for (FoDiscordBotAddon addon : plugin.getAddons()) {
+            addon.contributeCommands(commands);
         }
 
         String guildId = plugin.getPluginConfig().normalizedGuildId();
@@ -1064,335 +934,4 @@ public final class DiscordBotManager extends ListenerAdapter {
         return builder.build();
     }
 
-    private MessageEmbed createAdvancementEmbed(AdvancementProfileView profile, int requestedPage) {
-        int page = clampPage(profile, requestedPage);
-        AdvancementDisplayPage displayPage = resolveAdvancementPage(profile, page);
-        if (page == 0 || profile.tabs().isEmpty()) {
-            return createAdvancementOverviewEmbed(profile, page);
-        }
-        return createAdvancementTabEmbed(profile, displayPage);
-    }
-
-    private MessageEmbed createAdvancementOverviewEmbed(AdvancementProfileView profile, int page) {
-        EmbedBuilder builder = new EmbedBuilder()
-                .setColor(new Color(ADVANCEMENT_COLOR))
-                .setTitle("🏆 " + profile.playerName() + " Advancements")
-                .setThumbnail(buildMinecraftAvatarUrl(profile.playerUuid(), profile.playerName()))
-                .setDescription(String.join("\n",
-                        "🎮 **Gamemode:** `" + profile.gamemodeId() + "`",
-                        "📊 **Progress:** " + formatProgress(profile.completed(), profile.total()),
-                        "⭐ **Points:** `" + profile.points() + "`"
-                ))
-                .setFooter(advancementFooter(profile, page));
-
-        if (profile.tabs().isEmpty()) {
-            builder.addField("📁 Tabs", "No advancement data available.", false);
-            return builder.build();
-        }
-
-        int shown = 0;
-        int firstTabPage = 1;
-        for (AdvancementTabView tab : profile.tabs()) {
-            if (shown >= 24) {
-                break;
-            }
-            int tabPageCount = advancementTabPageCount(tab);
-            int entryCount = advancementEntryCount(tab);
-            builder.addField(
-                    truncate("📁 " + firstNonBlank(tab.title(), tab.id()), 256),
-                    advancementOverviewTabValue(tab, entryCount, firstTabPage, tabPageCount),
-                    true
-            );
-            shown++;
-            firstTabPage += tabPageCount;
-        }
-        if (profile.tabs().size() > shown) {
-            builder.addField("➕ More", "`" + (profile.tabs().size() - shown) + "` more tabs available with Next.", false);
-        }
-        return builder.build();
-    }
-
-    private MessageEmbed createAdvancementTabEmbed(AdvancementProfileView profile, AdvancementDisplayPage displayPage) {
-        AdvancementTabView tab = displayPage.tab();
-        String tabTitle = firstNonBlank(tab.title(), tab.id());
-
-        StringBuilder description = new StringBuilder();
-        if (tab.description() != null && !tab.description().isEmpty()) {
-            description.append("📝 ").append(truncate(String.join("\n", tab.description()), 560)).append("\n\n");
-        }
-        description.append("📊 **Progress:** ").append(formatProgress(tab.completed(), tab.total())).append("\n");
-        description.append("📄 **Tab page:** `").append(displayPage.entryPage() + 1).append("/")
-                .append(displayPage.tabPageCount()).append("`");
-        description.append(" • 📜 **Entries:** `").append(displayPage.entryCount()).append("`");
-
-        EmbedBuilder builder = new EmbedBuilder()
-                .setColor(new Color(ADVANCEMENT_COLOR))
-                .setTitle("📁 " + profile.playerName() + " - " + tabTitle)
-                .setThumbnail(buildMinecraftAvatarUrl(profile.playerUuid(), profile.playerName()))
-                .setDescription(description.toString())
-                .setFooter(advancementFooter(profile, displayPage.page()));
-
-        int start = displayPage.entryPage() * MAX_ADVANCEMENT_FIELDS;
-        int end = start + MAX_ADVANCEMENT_FIELDS;
-        int shown = 0;
-        int entryIndex = 0;
-        for (AdvancementEntryView entry : tab.advancements()) {
-            if (!displayAdvancement(entry)) {
-                continue;
-            }
-
-            if (entryIndex >= start && entryIndex < end) {
-                builder.addField(
-                        advancementEntryTitle(entry),
-                        advancementEntryValue(entry),
-                        false
-                );
-                shown++;
-            }
-            entryIndex++;
-        }
-
-        if (shown == 0) {
-            builder.addField("📜 Advancements", "No advancements in this tab yet.", false);
-        }
-
-        return builder.build();
-    }
-
-    private String advancementEntryTitle(AdvancementEntryView entry) {
-        String state = entry.completed() ? "✅ " : advancementHidden(entry) ? "🔒 " : "⬜ ";
-        return truncate(state + firstNonBlank(entry.title(), entry.id()), 256);
-    }
-
-    private String advancementEntryValue(AdvancementEntryView entry) {
-        List<String> lines = new ArrayList<>();
-        lines.add("📊 " + formatProgress(entry.current(), entry.required()) + " • ⭐ Points `" + entry.points() + "`");
-        if (advancementHidden(entry)) {
-            lines.add("🔒 Hidden in-game");
-        }
-        if (entry.description() != null && !entry.description().isEmpty()) {
-            lines.add("📝 " + truncate(String.join("\n", entry.description()), 650));
-        }
-        return truncate(String.join("\n", lines), 1_024);
-    }
-
-    private List<ActionRow> createAdvancementComponents(String token, AdvancementProfileView profile, int requestedPage) {
-        int pageCount = advancementPageCount(profile);
-        if (pageCount <= 1) {
-            return List.of();
-        }
-
-        int page = clampPage(profile, requestedPage);
-        List<ActionRow> rows = new ArrayList<>();
-        rows.addAll(createAdvancementTabRows(token, profile, page));
-        Button previous = Button.secondary(advancementButtonId(token, "prev", Math.max(0, page - 1)), "◀ Prev")
-                .withDisabled(page <= 0);
-        Button overview = Button.primary(advancementButtonId(token, "overview", 0), "🏠 Overview")
-                .withDisabled(page == 0);
-        Button next = Button.secondary(advancementButtonId(token, "next", Math.min(pageCount - 1, page + 1)), "Next ▶")
-                .withDisabled(page >= pageCount - 1);
-        rows.add(ActionRow.of(previous, overview, next));
-        return List.copyOf(rows);
-    }
-
-    private List<ActionRow> createAdvancementTabRows(String token, AdvancementProfileView profile, int page) {
-        if (profile == null || profile.tabs() == null || profile.tabs().isEmpty()) {
-            return List.of();
-        }
-
-        AdvancementDisplayPage currentPage = resolveAdvancementPage(profile, page);
-        int tabCount = profile.tabs().size();
-        int firstTab = 0;
-        if (tabCount > MAX_ADVANCEMENT_TAB_BUTTONS) {
-            int center = Math.max(0, currentPage.tabIndex());
-            firstTab = Math.max(0, Math.min(center - (MAX_ADVANCEMENT_TAB_BUTTONS / 2), tabCount - MAX_ADVANCEMENT_TAB_BUTTONS));
-        }
-        int lastTab = Math.min(tabCount, firstTab + MAX_ADVANCEMENT_TAB_BUTTONS);
-
-        List<ActionRow> rows = new ArrayList<>();
-        List<Button> currentRow = new ArrayList<>();
-        int firstPageForTab = 1;
-        for (int tabIndex = 0; tabIndex < tabCount; tabIndex++) {
-            AdvancementTabView tab = profile.tabs().get(tabIndex);
-            int tabPageCount = advancementTabPageCount(tab);
-            if (tabIndex >= firstTab && tabIndex < lastTab) {
-                boolean active = tabIndex == currentPage.tabIndex();
-                currentRow.add(advancementTabButton(token, tabIndex, tab, firstPageForTab, active));
-                if (currentRow.size() == DISCORD_BUTTONS_PER_ROW) {
-                    rows.add(ActionRow.of(currentRow));
-                    currentRow.clear();
-                }
-            }
-            firstPageForTab += tabPageCount;
-        }
-
-        if (!currentRow.isEmpty()) {
-            rows.add(ActionRow.of(currentRow));
-        }
-        return rows;
-    }
-
-    private Button advancementTabButton(String token, int tabIndex, AdvancementTabView tab, int page, boolean active) {
-        String label = truncate("📁 " + (tabIndex + 1) + " " + firstNonBlank(tab.title(), tab.id()), 80);
-        Button button = active
-                ? Button.primary(advancementButtonId(token, "tab" + tabIndex, page), label)
-                : Button.secondary(advancementButtonId(token, "tab" + tabIndex, page), label);
-        return active ? button.withDisabled(true) : button;
-    }
-
-    private String createAdvancementSession(AdvancementProfileView profile) {
-        cleanupExpiredAdvancementSessions();
-
-        String token;
-        do {
-            token = UUID.randomUUID().toString().substring(0, 8);
-        } while (advancementSessions.containsKey(token));
-
-        advancementSessions.put(token, new AdvancementSession(profile, Instant.now().plus(ADVANCEMENT_SESSION_TTL)));
-        return token;
-    }
-
-    private void cleanupExpiredAdvancementSessions() {
-        advancementSessions.entrySet().removeIf(entry -> entry.getValue().expired());
-    }
-
-    private String advancementButtonId(String token, String action, int page) {
-        return ADVANCEMENT_CUSTOM_ID_PREFIX + token + ":" + action + ":" + page;
-    }
-
-    private int advancementPageCount(AdvancementProfileView profile) {
-        if (profile == null || profile.tabs() == null || profile.tabs().isEmpty()) {
-            return 1;
-        }
-
-        int pages = 1;
-        for (AdvancementTabView tab : profile.tabs()) {
-            pages += advancementTabPageCount(tab);
-        }
-        return pages;
-    }
-
-    private int clampPage(AdvancementProfileView profile, int page) {
-        int max = Math.max(0, advancementPageCount(profile) - 1);
-        return Math.max(0, Math.min(page, max));
-    }
-
-    private int parsePage(String input) {
-        try {
-            return LargeNumberParser.parse(input).orElseThrow().intValueExact();
-        } catch (RuntimeException exception) {
-            return 0;
-        }
-    }
-
-    private String advancementFooter(AdvancementProfileView profile, int page) {
-        String version = firstNonBlank(profile.pluginVersion(), "unknown");
-        return "FoAdvancements " + version + " | Page " + (page + 1) + "/" + advancementPageCount(profile);
-    }
-
-    private AdvancementDisplayPage resolveAdvancementPage(AdvancementProfileView profile, int page) {
-        if (page <= 0 || profile == null || profile.tabs() == null || profile.tabs().isEmpty()) {
-            return AdvancementDisplayPage.overview();
-        }
-
-        int currentPage = 1;
-        for (int tabIndex = 0; tabIndex < profile.tabs().size(); tabIndex++) {
-            AdvancementTabView tab = profile.tabs().get(tabIndex);
-            int tabPageCount = advancementTabPageCount(tab);
-            if (page < currentPage + tabPageCount) {
-                return new AdvancementDisplayPage(
-                        page,
-                        tabIndex,
-                        tab,
-                        page - currentPage,
-                        tabPageCount,
-                        advancementEntryCount(tab)
-                );
-            }
-            currentPage += tabPageCount;
-        }
-
-        return AdvancementDisplayPage.overview();
-    }
-
-    private int advancementTabPageCount(AdvancementTabView tab) {
-        int entryCount = advancementEntryCount(tab);
-        return Math.max(1, (entryCount + MAX_ADVANCEMENT_FIELDS - 1) / MAX_ADVANCEMENT_FIELDS);
-    }
-
-    private int advancementEntryCount(AdvancementTabView tab) {
-        if (tab == null || tab.advancements() == null) {
-            return 0;
-        }
-
-        int count = 0;
-        for (AdvancementEntryView entry : tab.advancements()) {
-            if (displayAdvancement(entry)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private boolean displayAdvancement(AdvancementEntryView entry) {
-        return entry != null;
-    }
-
-    private boolean advancementHidden(AdvancementEntryView entry) {
-        return entry != null && !entry.completed() && (entry.hidden() || !entry.visible());
-    }
-
-    private String advancementOverviewTabValue(AdvancementTabView tab, int entryCount, int firstPage, int tabPageCount) {
-        List<String> lines = new ArrayList<>();
-        lines.add("📊 " + formatProgress(tab.completed(), tab.total()));
-        lines.add("📜 `" + entryCount + "` entries");
-        lines.add(tabPageCount == 1
-                ? "📄 Page `" + (firstPage + 1) + "`"
-                : "📄 Pages `" + (firstPage + 1) + "-" + (firstPage + tabPageCount) + "`");
-        return String.join("\n", lines);
-    }
-
-    private String formatProgress(int completed, int total) {
-        int percent = progressPercent(completed, total);
-        return progressBar(percent) + " `" + Math.max(0, completed) + "/" + Math.max(0, total) + "` (`" + percent + "%`)";
-    }
-
-    private int progressPercent(int completed, int total) {
-        if (total <= 0) {
-            return 0;
-        }
-        return Math.max(0, Math.min(100, (completed * 100) / total));
-    }
-
-    private String progressBar(int percent) {
-        int filled = (int) Math.round((Math.max(0, Math.min(100, percent)) / 100.0) * ADVANCEMENT_PROGRESS_BAR_SEGMENTS);
-        if (percent > 0 && filled == 0) {
-            filled = 1;
-        }
-
-        StringBuilder builder = new StringBuilder(ADVANCEMENT_PROGRESS_BAR_SEGMENTS * 2);
-        for (int index = 0; index < ADVANCEMENT_PROGRESS_BAR_SEGMENTS; index++) {
-            builder.append(index < filled ? "🟩" : "⬛");
-        }
-        return builder.toString();
-    }
-
-    private record AdvancementSession(AdvancementProfileView profile, Instant expiresAt) {
-        private boolean expired() {
-            return Instant.now().isAfter(expiresAt);
-        }
-    }
-
-    private record AdvancementDisplayPage(
-            int page,
-            int tabIndex,
-            AdvancementTabView tab,
-            int entryPage,
-            int tabPageCount,
-            int entryCount
-    ) {
-        private static AdvancementDisplayPage overview() {
-            return new AdvancementDisplayPage(0, -1, null, 0, 1, 0);
-        }
-    }
 }

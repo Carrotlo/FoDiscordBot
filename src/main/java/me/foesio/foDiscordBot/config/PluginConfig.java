@@ -42,7 +42,6 @@ public record PluginConfig(
         List<String> boosterRemovalCommands,
         boolean rankSyncEnabled,
         List<RankRoleMapping> rankSyncMappings,
-        boolean advancementEnabled,
         int codeLength,
         Duration codeExpiry,
         Duration ingameCommandCooldown,
@@ -168,7 +167,6 @@ public record PluginConfig(
                 List.copyOf(config.getStringList("booster.removal-commands")),
                 rankSync != null && rankSync.getBoolean("enabled", false),
                 List.copyOf(rankMappings),
-                advancementEnabled(config),
                 clamp(config.getInt("linking.code-length", 6), 4, 12),
                 Duration.ofSeconds(Math.max(60L, linking != null ? linking.getLong("code-expiry-seconds", 600L) : 600L)),
                 Duration.ofSeconds(Math.max(1L, linking != null ? linking.getLong("ingame-command-cooldown-seconds", 30L) : 30L)),
@@ -256,13 +254,6 @@ public record PluginConfig(
             return commands;
         }
         return config.getStringList("linking.reward-commands");
-    }
-
-    private static boolean advancementEnabled(FileConfiguration config) {
-        if (config.contains("advancement.enabled", true)) {
-            return config.getBoolean("advancement.enabled", false);
-        }
-        return config.getBoolean("advancements.enabled", false);
     }
 
     private static String normalizeGamemode(String value) {

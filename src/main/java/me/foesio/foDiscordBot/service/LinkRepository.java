@@ -24,9 +24,7 @@ import java.util.UUID;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import me.foesio.foDiscordBot.FoDiscordBot;
-import me.foesio.foDiscordBot.model.AdvancementEntryView;
-import me.foesio.foDiscordBot.model.AdvancementProfileView;
-import me.foesio.foDiscordBot.model.AdvancementTabView;
+import me.foesio.foDiscordBot.api.DatabaseAction;
 import me.foesio.foDiscordBot.model.DiscordUserSnapshot;
 import me.foesio.foDiscordBot.model.LeaderboardView;
 import me.foesio.foDiscordBot.model.LinkCompletionResult;
@@ -39,8 +37,6 @@ import me.foesio.foDiscordBot.model.UnlinkResult;
 public final class LinkRepository {
 
     private static final String CODE_CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    private static final int ADVANCEMENT_BATCH_SIZE = 500;
-
     private final FoDiscordBot plugin;
     private final String sqliteJdbcUrl;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -238,75 +234,6 @@ public final class LinkRepository {
                         )
                         """);
 
-                if (plugin.getPluginConfig().advancementEnabled() || plugin.getPluginConfig().networkEnabled()) {
-                    statement.executeUpdate("""
-                            CREATE TABLE IF NOT EXISTS network_advancement_gamemodes (
-                                gamemode_id VARCHAR(64) PRIMARY KEY,
-                                plugin_version VARCHAR(32),
-                                updated_at BIGINT NOT NULL
-                            )
-                            """);
-
-                    statement.executeUpdate("""
-                            CREATE TABLE IF NOT EXISTS network_advancement_players (
-                                gamemode_id VARCHAR(64) NOT NULL,
-                                player_uuid VARCHAR(36) NOT NULL,
-                                player_name VARCHAR(32) NOT NULL,
-                                player_name_lower VARCHAR(32),
-                                plugin_version VARCHAR(32),
-                                points INTEGER NOT NULL DEFAULT 0,
-                                completed INTEGER NOT NULL DEFAULT 0,
-                                total INTEGER NOT NULL DEFAULT 0,
-                                updated_at BIGINT NOT NULL,
-                                PRIMARY KEY (gamemode_id, player_uuid)
-                            )
-                            """);
-                    addColumnIfMissing(connection, "network_advancement_players", "player_name_lower", "VARCHAR(32)");
-                    backfillAdvancementPlayerNameLower(connection);
-                    createIndexIfMissing(statement, """
-                            CREATE INDEX idx_network_advancement_player_name
-                            ON network_advancement_players(gamemode_id, player_name)
-                            """);
-                    createIndexIfMissing(statement, """
-                            CREATE INDEX idx_network_advancement_player_name_lower
-                            ON network_advancement_players(gamemode_id, player_name_lower)
-                            """);
-
-                    statement.executeUpdate("""
-                            CREATE TABLE IF NOT EXISTS network_advancement_entries (
-                                gamemode_id VARCHAR(64) NOT NULL,
-                                player_uuid VARCHAR(36) NOT NULL,
-                                tab_id VARCHAR(64) NOT NULL,
-                                tab_title TEXT NOT NULL,
-                                tab_description TEXT,
-                                tab_icon VARCHAR(64),
-                                tab_background TEXT,
-                                tab_completed INTEGER NOT NULL DEFAULT 0,
-                                tab_total INTEGER NOT NULL DEFAULT 0,
-                                tab_position INTEGER NOT NULL DEFAULT 0,
-                                advancement_id VARCHAR(64) NOT NULL,
-                                full_id VARCHAR(128) NOT NULL,
-                                title TEXT NOT NULL,
-                                description TEXT,
-                                icon VARCHAR(64),
-                                frame VARCHAR(32),
-                                current_progress INTEGER NOT NULL DEFAULT 0,
-                                required_progress INTEGER NOT NULL DEFAULT 1,
-                                completed INTEGER NOT NULL DEFAULT 0,
-                                visible INTEGER NOT NULL DEFAULT 0,
-                                hidden INTEGER NOT NULL DEFAULT 0,
-                                points INTEGER NOT NULL DEFAULT 0,
-                                position INTEGER NOT NULL DEFAULT 0,
-                                updated_at BIGINT NOT NULL,
-                                PRIMARY KEY (gamemode_id, player_uuid, full_id)
-                            )
-                            """);
-                    createIndexIfMissing(statement, """
-                            CREATE INDEX idx_network_advancement_entries_player_position
-                            ON network_advancement_entries(gamemode_id, player_uuid, tab_position, position)
-                            """);
-                }
-
                 statement.executeUpdate("""
                         CREATE TABLE IF NOT EXISTS network_chat_relay_queue (
                             id BIGINT NOT NULL AUTO_INCREMENT,
@@ -330,6 +257,15 @@ public final class LinkRepository {
         }
     }
 
+    public <T> T withConnection(DatabaseAction<T> action) throws SQLException {
+        if (action == null) {
+            throw new SQLException("Database action cannot be null.");
+        }
+        try (Connection connection = openConnection()) {
+            return action.execute(connection);
+        }
+    }
+
     private void createIndexIfMissing(Statement statement, String createIndexSql) throws SQLException {
         try {
             statement.executeUpdate(createIndexSql);
@@ -349,16 +285,6 @@ public final class LinkRepository {
                 return;
             }
             throw exception;
-        }
-    }
-
-    private void backfillAdvancementPlayerNameLower(Connection connection) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE network_advancement_players
-                SET player_name_lower = LOWER(player_name)
-                WHERE player_name_lower IS NULL OR player_name_lower = ''
-                """)) {
-            statement.executeUpdate();
         }
     }
 
@@ -2120,261 +2046,6 @@ public final class LinkRepository {
         }
     }
 
-    public void upsertAdvancementGamemode(String gamemodeId, String pluginVersion, Instant now) throws SQLException {
-        String normalizedGamemode = normalizeGamemode(gamemodeId);
-        try (Connection connection = openConnection()) {
-            upsertGamemode(connection, normalizedGamemode, now);
-            upsertAdvancementGamemode(connection, normalizedGamemode, pluginVersion, now);
-        }
-    }
-
-    public void saveAdvancementSnapshot(AdvancementProfileView view, Instant now) throws SQLException {
-        if (view == null) {
-            return;
-        }
-        saveAdvancementSnapshots(List.of(view), now);
-    }
-
-    public void saveAdvancementSnapshots(List<AdvancementProfileView> views, Instant now) throws SQLException {
-        List<AdvancementProfileView> snapshots = views == null
-                ? List.of()
-                : views.stream().filter(this::validAdvancementView).toList();
-        if (snapshots.isEmpty()) {
-            return;
-        }
-
-        try (Connection connection = openConnection()) {
-            connection.setAutoCommit(false);
-            try {
-                Set<String> upsertedGamemodes = new HashSet<>();
-                int pendingEntries = 0;
-                try (PreparedStatement deleteStatement = connection.prepareStatement("""
-                        DELETE FROM network_advancement_entries
-                        WHERE gamemode_id = ? AND player_uuid = ?
-                        """);
-                     PreparedStatement insertStatement = connection.prepareStatement("""
-                        INSERT INTO network_advancement_entries (
-                            gamemode_id, player_uuid, tab_id, tab_title, tab_description, tab_icon,
-                            tab_background, tab_completed, tab_total, tab_position, advancement_id,
-                            full_id, title, description, icon, frame, current_progress, required_progress,
-                            completed, visible, hidden, points, position, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """)) {
-                    for (AdvancementProfileView view : snapshots) {
-                        String normalizedGamemode = normalizeGamemode(view.gamemodeId());
-                        if (upsertedGamemodes.add(normalizedGamemode)) {
-                            upsertGamemode(connection, normalizedGamemode, now);
-                            upsertAdvancementGamemode(connection, normalizedGamemode, view.pluginVersion(), now);
-                        }
-
-                        upsertAdvancementPlayer(connection, normalizedGamemode, view, now);
-
-                        deleteStatement.setString(1, normalizedGamemode);
-                        deleteStatement.setString(2, view.playerUuid().toString());
-                        deleteStatement.executeUpdate();
-
-                        pendingEntries = addAdvancementEntries(insertStatement, normalizedGamemode, view, now, pendingEntries);
-                    }
-                    insertStatement.executeBatch();
-                }
-
-                connection.commit();
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(true);
-            }
-        }
-    }
-
-    private int addAdvancementEntries(
-            PreparedStatement statement,
-            String normalizedGamemode,
-            AdvancementProfileView view,
-            Instant now,
-            int pendingEntries
-    ) throws SQLException {
-        long nowEpoch = now.getEpochSecond();
-        List<AdvancementTabView> tabs = view.tabs() == null ? List.of() : view.tabs();
-        Set<String> usedFullIds = new HashSet<>();
-        for (int tabIndex = 0; tabIndex < tabs.size(); tabIndex++) {
-            AdvancementTabView tab = tabs.get(tabIndex);
-            if (tab == null) {
-                continue;
-            }
-
-            String tabId = requiredDbValue(tab.id(), "tab-" + tabIndex, 64);
-            String tabTitle = requiredDbValue(tab.title(), tabId, 256);
-            List<AdvancementEntryView> advancements = tab.advancements() == null ? List.of() : tab.advancements();
-            for (int advancementIndex = 0; advancementIndex < advancements.size(); advancementIndex++) {
-                AdvancementEntryView advancement = advancements.get(advancementIndex);
-                if (advancement == null) {
-                    continue;
-                }
-
-                String advancementId = requiredDbValue(advancement.id(), "advancement-" + advancementIndex, 64);
-                String fullId = uniqueAdvancementFullId(
-                        usedFullIds,
-                        requiredDbValue(advancement.fullId(), tabId + "/" + advancementId, 128),
-                        tabId,
-                        advancementIndex
-                );
-                statement.setString(1, normalizedGamemode);
-                statement.setString(2, view.playerUuid().toString());
-                statement.setString(3, tabId);
-                statement.setString(4, tabTitle);
-                statement.setString(5, joinLines(tab.description()));
-                statement.setString(6, nullableDbValue(tab.icon(), 64));
-                statement.setString(7, tab.background());
-                statement.setInt(8, tab.completed());
-                statement.setInt(9, tab.total());
-                statement.setInt(10, tabIndex);
-                statement.setString(11, advancementId);
-                statement.setString(12, fullId);
-                statement.setString(13, requiredDbValue(advancement.title(), advancementId, 256));
-                statement.setString(14, joinLines(advancement.description()));
-                statement.setString(15, nullableDbValue(advancement.icon(), 64));
-                statement.setString(16, nullableDbValue(advancement.frame(), 32));
-                statement.setInt(17, advancement.current());
-                statement.setInt(18, advancement.required());
-                statement.setInt(19, advancement.completed() ? 1 : 0);
-                statement.setInt(20, advancement.visible() ? 1 : 0);
-                statement.setInt(21, advancement.hidden() ? 1 : 0);
-                statement.setInt(22, advancement.points());
-                statement.setInt(23, advancementIndex);
-                statement.setLong(24, nowEpoch);
-                statement.addBatch();
-                pendingEntries++;
-                if (pendingEntries >= ADVANCEMENT_BATCH_SIZE) {
-                    statement.executeBatch();
-                    pendingEntries = 0;
-                }
-            }
-        }
-        return pendingEntries;
-    }
-
-    public Optional<AdvancementProfileView> findAdvancementSnapshot(String gamemodeId, String query) throws SQLException {
-        String normalizedGamemode = normalizeGamemode(gamemodeId);
-        String trimmed = query == null ? "" : query.trim();
-        if (trimmed.isBlank()) {
-            return Optional.empty();
-        }
-
-        try (Connection connection = openConnection()) {
-            AdvancementPlayerRow player = findAdvancementPlayer(connection, normalizedGamemode, trimmed).orElse(null);
-            if (player == null) {
-                return Optional.empty();
-            }
-
-            Map<String, MutableAdvancementTab> tabs = new LinkedHashMap<>();
-            try (PreparedStatement statement = connection.prepareStatement("""
-                    SELECT tab_id, tab_title, tab_description, tab_icon, tab_background,
-                           tab_completed, tab_total, advancement_id, full_id, title,
-                           description, icon, frame, current_progress, required_progress,
-                           completed, visible, hidden, points
-                    FROM network_advancement_entries
-                    WHERE gamemode_id = ? AND player_uuid = ?
-                    ORDER BY tab_position ASC, position ASC
-                    """)) {
-                statement.setString(1, normalizedGamemode);
-                statement.setString(2, player.playerUuid().toString());
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    while (resultSet.next()) {
-                        String tabId = resultSet.getString("tab_id");
-                        MutableAdvancementTab tab = tabs.get(tabId);
-                        if (tab == null) {
-                            tab = new MutableAdvancementTab(
-                                    tabId,
-                                    resultSet.getString("tab_title"),
-                                    splitLines(resultSet.getString("tab_description")),
-                                    resultSet.getString("tab_icon"),
-                                    resultSet.getString("tab_background"),
-                                    resultSet.getInt("tab_completed"),
-                                    resultSet.getInt("tab_total"),
-                                    new ArrayList<>()
-                            );
-                            tabs.put(tabId, tab);
-                        }
-                        tab.advancements().add(new AdvancementEntryView(
-                                resultSet.getString("advancement_id"),
-                                resultSet.getString("full_id"),
-                                resultSet.getString("title"),
-                                splitLines(resultSet.getString("description")),
-                                resultSet.getString("icon"),
-                                resultSet.getString("frame"),
-                                resultSet.getInt("current_progress"),
-                                resultSet.getInt("required_progress"),
-                                resultSet.getInt("completed") == 1,
-                                resultSet.getInt("visible") == 1,
-                                resultSet.getInt("hidden") == 1,
-                                resultSet.getInt("points")
-                        ));
-                    }
-                }
-            }
-
-            return Optional.of(new AdvancementProfileView(
-                    normalizedGamemode,
-                    player.playerUuid(),
-                    player.playerName(),
-                    player.pluginVersion(),
-                    player.points(),
-                    player.completed(),
-                    player.total(),
-                    tabs.values().stream().map(MutableAdvancementTab::toView).toList()
-            ));
-        }
-    }
-
-    public List<String> listAdvancementGamemodeIds() throws SQLException {
-        try (Connection connection = openConnection();
-             PreparedStatement statement = connection.prepareStatement("""
-                     SELECT gamemode_id
-                     FROM network_advancement_gamemodes
-                     ORDER BY gamemode_id ASC
-                     """)) {
-            List<String> gamemodes = new ArrayList<>();
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
-                    String value = resultSet.getString("gamemode_id");
-                    if (value != null && !value.isBlank()) {
-                        gamemodes.add(value);
-                    }
-                }
-            }
-            return List.copyOf(gamemodes);
-        }
-    }
-
-    public List<String> listAdvancementPlayerNames(String gamemodeId, String focusedLower, int limit) throws SQLException {
-        String normalizedGamemode = normalizeGamemode(gamemodeId);
-        String focused = focusedLower == null ? "" : focusedLower.toLowerCase(Locale.ROOT);
-        try (Connection connection = openConnection();
-             PreparedStatement statement = connection.prepareStatement("""
-                     SELECT player_name
-                     FROM network_advancement_players
-                     WHERE gamemode_id = ? AND player_name_lower LIKE ?
-                     ORDER BY player_name ASC
-                     LIMIT ?
-                     """)) {
-            statement.setString(1, normalizedGamemode);
-            statement.setString(2, focused + "%");
-            statement.setInt(3, Math.max(1, Math.min(25, limit)));
-            List<String> players = new ArrayList<>();
-            try (ResultSet resultSet = statement.executeQuery()) {
-                while (resultSet.next()) {
-                    String value = resultSet.getString("player_name");
-                    if (value != null && !value.isBlank()) {
-                        players.add(value);
-                    }
-                }
-            }
-            return List.copyOf(players);
-        }
-    }
-
     public List<String> listGamemodeIds() throws SQLException {
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement("""
@@ -2501,7 +2172,7 @@ public final class LinkRepository {
         }
     }
 
-    private Connection openConnection() throws SQLException {
+    public Connection openConnection() throws SQLException {
         HikariDataSource active = activeDataSource();
         Connection connection = active.getConnection();
         if (!plugin.getPluginConfig().networkEnabled()) {
@@ -2814,197 +2485,6 @@ public final class LinkRepository {
         }
     }
 
-    private void upsertAdvancementGamemode(Connection connection, String gamemodeId, String pluginVersion, Instant now) throws SQLException {
-        int updated;
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE network_advancement_gamemodes
-                SET plugin_version = ?, updated_at = ?
-                WHERE gamemode_id = ?
-                """)) {
-            setNullableString(statement, 1, nullableDbValue(pluginVersion, 32));
-            statement.setLong(2, now.getEpochSecond());
-            statement.setString(3, gamemodeId);
-            updated = statement.executeUpdate();
-        }
-        if (updated > 0) {
-            return;
-        }
-
-        try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO network_advancement_gamemodes(gamemode_id, plugin_version, updated_at)
-                VALUES (?, ?, ?)
-                """)) {
-            statement.setString(1, gamemodeId);
-            setNullableString(statement, 2, nullableDbValue(pluginVersion, 32));
-            statement.setLong(3, now.getEpochSecond());
-            statement.executeUpdate();
-        } catch (SQLException exception) {
-            if (!isConstraintViolation(exception)) {
-                throw exception;
-            }
-            upsertAdvancementGamemode(connection, gamemodeId, pluginVersion, now);
-        }
-    }
-
-    private void upsertAdvancementPlayer(
-            Connection connection,
-            String gamemodeId,
-            AdvancementProfileView view,
-            Instant now
-    ) throws SQLException {
-        String playerName = requiredDbValue(view.playerName(), view.playerUuid().toString(), 32);
-        String pluginVersion = nullableDbValue(view.pluginVersion(), 32);
-        int updated;
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE network_advancement_players
-                SET player_name = ?, player_name_lower = ?, plugin_version = ?, points = ?, completed = ?, total = ?, updated_at = ?
-                WHERE gamemode_id = ? AND player_uuid = ?
-                """)) {
-            statement.setString(1, playerName);
-            statement.setString(2, normalizePlayerName(playerName));
-            setNullableString(statement, 3, pluginVersion);
-            statement.setInt(4, view.points());
-            statement.setInt(5, view.completed());
-            statement.setInt(6, view.total());
-            statement.setLong(7, now.getEpochSecond());
-            statement.setString(8, gamemodeId);
-            statement.setString(9, view.playerUuid().toString());
-            updated = statement.executeUpdate();
-        }
-        if (updated > 0) {
-            return;
-        }
-
-        try (PreparedStatement statement = connection.prepareStatement("""
-                INSERT INTO network_advancement_players (
-                    gamemode_id, player_uuid, player_name, player_name_lower, plugin_version,
-                    points, completed, total, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """)) {
-            statement.setString(1, gamemodeId);
-            statement.setString(2, view.playerUuid().toString());
-            statement.setString(3, playerName);
-            statement.setString(4, normalizePlayerName(playerName));
-            setNullableString(statement, 5, pluginVersion);
-            statement.setInt(6, view.points());
-            statement.setInt(7, view.completed());
-            statement.setInt(8, view.total());
-            statement.setLong(9, now.getEpochSecond());
-            statement.executeUpdate();
-        } catch (SQLException exception) {
-            if (!isConstraintViolation(exception)) {
-                throw exception;
-            }
-            upsertAdvancementPlayer(connection, gamemodeId, view, now);
-        }
-    }
-
-    private Optional<AdvancementPlayerRow> findAdvancementPlayer(
-            Connection connection,
-            String gamemodeId,
-            String query
-    ) throws SQLException {
-        UUID uuid = parseUuid(query);
-        if (uuid != null) {
-            try (PreparedStatement statement = connection.prepareStatement("""
-                    SELECT gamemode_id, player_uuid, player_name, plugin_version,
-                           points, completed, total, updated_at
-                    FROM network_advancement_players
-                    WHERE gamemode_id = ? AND player_uuid = ?
-                    LIMIT 1
-                    """)) {
-                statement.setString(1, gamemodeId);
-                statement.setString(2, uuid.toString());
-                try (ResultSet resultSet = statement.executeQuery()) {
-                    return resultSet.next()
-                            ? Optional.of(readAdvancementPlayer(resultSet))
-                            : Optional.empty();
-                }
-            }
-        }
-
-        try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT gamemode_id, player_uuid, player_name, plugin_version,
-                       points, completed, total, updated_at
-                FROM network_advancement_players
-                WHERE gamemode_id = ? AND player_name_lower = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """)) {
-            statement.setString(1, gamemodeId);
-            statement.setString(2, normalizePlayerName(query));
-            try (ResultSet resultSet = statement.executeQuery()) {
-                return resultSet.next()
-                        ? Optional.of(readAdvancementPlayer(resultSet))
-                        : Optional.empty();
-            }
-        }
-    }
-
-    private AdvancementPlayerRow readAdvancementPlayer(ResultSet resultSet) throws SQLException {
-        return new AdvancementPlayerRow(
-                resultSet.getString("gamemode_id"),
-                UUID.fromString(resultSet.getString("player_uuid")),
-                resultSet.getString("player_name"),
-                resultSet.getString("plugin_version"),
-                resultSet.getInt("points"),
-                resultSet.getInt("completed"),
-                resultSet.getInt("total"),
-                Instant.ofEpochSecond(resultSet.getLong("updated_at"))
-        );
-    }
-
-    private UUID parseUuid(String input) {
-        try {
-            return UUID.fromString(input);
-        } catch (IllegalArgumentException exception) {
-            return null;
-        }
-    }
-
-    private boolean validAdvancementView(AdvancementProfileView view) {
-        return view != null && view.playerUuid() != null;
-    }
-
-    private String uniqueAdvancementFullId(Set<String> usedFullIds, String candidate, String tabId, int advancementIndex) {
-        String normalized = requiredDbValue(candidate, tabId + "/" + advancementIndex, 128);
-        if (usedFullIds.add(normalized)) {
-            return normalized;
-        }
-
-        int collision = 1;
-        while (true) {
-            String suffix = "-" + advancementIndex + "-" + collision;
-            String unique = truncateDbValue(normalized, Math.max(1, 128 - suffix.length())) + suffix;
-            if (usedFullIds.add(unique)) {
-                return unique;
-            }
-            collision++;
-        }
-    }
-
-    private String requiredDbValue(String value, String fallback, int maxLength) {
-        String normalized = value == null || value.isBlank() ? fallback : value.trim();
-        if (normalized == null || normalized.isBlank()) {
-            normalized = "unknown";
-        }
-        return truncateDbValue(normalized, maxLength);
-    }
-
-    private String nullableDbValue(String value, int maxLength) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return truncateDbValue(value.trim(), maxLength);
-    }
-
-    private String truncateDbValue(String value, int maxLength) {
-        if (value == null || maxLength <= 0 || value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength);
-    }
-
     private boolean isConstraintViolation(SQLException exception) {
         String sqlState = exception.getSQLState();
         return sqlState != null && sqlState.startsWith("23");
@@ -3067,34 +2547,6 @@ public final class LinkRepository {
         return commands;
     }
 
-    private String joinLines(List<String> lines) {
-        if (lines == null || lines.isEmpty()) {
-            return "";
-        }
-
-        List<String> sanitized = new ArrayList<>();
-        for (String line : lines) {
-            if (line != null) {
-                sanitized.add(line);
-            }
-        }
-        return String.join("\n", sanitized);
-    }
-
-    private List<String> splitLines(String value) {
-        if (value == null || value.isBlank()) {
-            return List.of();
-        }
-
-        List<String> lines = new ArrayList<>();
-        for (String line : value.split("\\R", -1)) {
-            if (line != null && !line.isBlank()) {
-                lines.add(line);
-            }
-        }
-        return List.copyOf(lines);
-    }
-
     private void setNullableString(PreparedStatement statement, int index, String value) throws SQLException {
         if (value != null && !value.isBlank()) {
             statement.setString(index, value);
@@ -3124,10 +2576,6 @@ public final class LinkRepository {
 
     private boolean isAllScope(String value) {
         return value == null || value.isBlank() || "all".equalsIgnoreCase(value.trim());
-    }
-
-    private String normalizePlayerName(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     public record GamemodeRewardState(
@@ -3324,42 +2772,6 @@ public final class LinkRepository {
 
         private long claimedAtOrUpdatedAt() {
             return claimedAtEpoch > 0L ? claimedAtEpoch : updatedAtEpoch;
-        }
-    }
-
-    private record AdvancementPlayerRow(
-            String gamemodeId,
-            UUID playerUuid,
-            String playerName,
-            String pluginVersion,
-            int points,
-            int completed,
-            int total,
-            Instant updatedAt
-    ) {
-    }
-
-    private record MutableAdvancementTab(
-            String id,
-            String title,
-            List<String> description,
-            String icon,
-            String background,
-            int completed,
-            int total,
-            List<AdvancementEntryView> advancements
-    ) {
-        private AdvancementTabView toView() {
-            return new AdvancementTabView(
-                    id,
-                    title,
-                    description,
-                    icon,
-                    background,
-                    completed,
-                    total,
-                    List.copyOf(advancements)
-            );
         }
     }
 

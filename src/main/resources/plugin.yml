@@ -4,7 +4,7 @@ main: me.foesio.foDiscordBot.FoDiscordBot
 api-version: '1.21'
 authors: [ Foesio ]
 description: Discord bot integration with linking, rewards, profiles, and leaderboards
-softdepend: [ PlaceholderAPI, FoAdvancements, SkinsRestorer ]
+softdepend: [ PlaceholderAPI, SkinsRestorer ]
 commands:
   fodiscordbotadmin:
     description: Manage FoDiscordBot
@@ -13,15 +13,12 @@ commands:
   link:
     description: Generate a Discord link code
     usage: /link
-    permission: fodiscord.use
   unlink:
     description: Unlink your Discord account
     usage: /unlink
-    permission: fodiscord.use
   discord:
     description: Show the Discord invite link
     usage: /discord
-    permission: fodiscord.use
 permissions:
   fodiscordbot.admin:
     description: Reload and administrate FoDiscordBot

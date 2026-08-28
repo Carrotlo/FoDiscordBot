@@ -63,6 +63,13 @@ public final class FoDiscordCommand implements Listener {
             plugin.messages().sendConfigured(context.sender(), "ingame.loading");
             boolean success = plugin.reloadPlugin();
             plugin.messages().sendConfigured(context.sender(), success ? "ingame.reload.success" : "ingame.reload.error");
+            if (context.sender() instanceof Player player) {
+                if (success) {
+                    plugin.getAdminSounds().reload(player);
+                } else {
+                    plugin.getAdminSounds().reloadError(player);
+                }
+            }
             return true;
         }).usage("reload").build();
     }
@@ -166,6 +173,7 @@ public final class FoDiscordCommand implements Listener {
 
         if (slot == CANCEL_SLOT) {
             player.closeInventory();
+            plugin.getGuiSounds().cancel(player);
             plugin.messages().sendConfigured(player, "ingame.reset-rewards.cancelled");
             return;
         }
@@ -173,6 +181,7 @@ public final class FoDiscordCommand implements Listener {
         if (slot == CONTINUE_SLOT) {
             ResetRequest request = holder.request();
             player.closeInventory();
+            plugin.getGuiSounds().confirm(player);
             executeReset(player, request);
         }
     }
@@ -195,6 +204,7 @@ public final class FoDiscordCommand implements Listener {
 
         if (slot == CANCEL_SLOT) {
             player.closeInventory();
+            plugin.getGuiSounds().cancel(player);
             plugin.messages().sendConfigured(player, "ingame.reset-leaderboards.cancelled");
             return;
         }
@@ -202,6 +212,7 @@ public final class FoDiscordCommand implements Listener {
         if (slot == CONTINUE_SLOT) {
             LeaderboardResetRequest request = holder.request();
             player.closeInventory();
+            plugin.getGuiSounds().confirm(player);
             executeLeaderboardReset(player, request);
         }
     }
@@ -209,18 +220,21 @@ public final class FoDiscordCommand implements Listener {
     private void handleResetRewards(CommandSender sender, String[] args) {
         if (args.length < 3 || args.length > 4) {
             plugin.messages().sendConfigured(sender, "ingame.reset-rewards.usage");
+            commandError(sender);
             return;
         }
 
         RewardKind kind = RewardKind.from(args[1]);
         if (kind == null) {
             plugin.messages().sendConfigured(sender, "ingame.reset-rewards.usage");
+            commandError(sender);
             return;
         }
 
         String targetInput = args[2].trim();
         if (targetInput.isBlank()) {
             plugin.messages().sendConfigured(sender, "ingame.reset-rewards.usage");
+            commandError(sender);
             return;
         }
 
@@ -253,18 +267,22 @@ public final class FoDiscordCommand implements Listener {
                 plugin.getCore().scheduler().runGlobal(() -> {
                     if (throwable != null) {
                         plugin.logWarning("Failed to reset reward claims: " + throwable.getMessage());
+                        commandError(sender);
                         plugin.messages().sendConfigured(sender, "ingame.reset-rewards.error");
                         return;
                     }
 
                     if (result.status() == ResetStatus.NOT_FOUND) {
+                        commandError(sender);
                         plugin.messages().send(sender, "ingame.reset-rewards.unknown-player",
                                 FoMessageService.missingMessageFallback("ingame.reset-rewards.unknown-player"), Map.of(
                                 "player", request.targetName()
                         ));
                         return;
                     }
-
+                    if (sender instanceof Player player) {
+                        plugin.getSounds().play(player, "discord.reset-complete");
+                    }
                     plugin.messages().send(sender, "ingame.reset-rewards.success",
                             FoMessageService.missingMessageFallback("ingame.reset-rewards.success"), Map.of(
                             "type", request.kind().displayName(),
@@ -341,17 +359,20 @@ public final class FoDiscordCommand implements Listener {
         inventory.setItem(CONTINUE_SLOT, EditorItemFactory.confirm());
 
         player.openInventory(inventory);
+        plugin.getGuiSounds().open(player);
         plugin.messages().sendConfigured(player, "ingame.reset-rewards.confirm-open");
     }
 
     private void handleResetLeaderboards(CommandSender sender, String[] args) {
         if (!plugin.getPluginConfig().networkEnabled()) {
             plugin.messages().sendConfigured(sender, "ingame.reset-leaderboards.network-disabled");
+            commandError(sender);
             return;
         }
 
         if (args.length < 2 || args.length > 3) {
             plugin.messages().sendConfigured(sender, "ingame.reset-leaderboards.usage");
+            commandError(sender);
             return;
         }
 
@@ -359,6 +380,7 @@ public final class FoDiscordCommand implements Listener {
         String boardInput = args.length >= 3 ? args[2].trim() : "all";
         if (gamemodeInput.isBlank() || boardInput.isBlank()) {
             plugin.messages().sendConfigured(sender, "ingame.reset-leaderboards.usage");
+            commandError(sender);
             return;
         }
 
@@ -388,10 +410,13 @@ public final class FoDiscordCommand implements Listener {
                 plugin.getCore().scheduler().runGlobal(() -> {
                     if (throwable != null) {
                         plugin.logWarning("Failed to reset leaderboard snapshots: " + throwable.getMessage());
+                        commandError(sender);
                         plugin.messages().sendConfigured(sender, "ingame.reset-leaderboards.error");
                         return;
                     }
-
+                    if (sender instanceof Player player) {
+                        plugin.getSounds().play(player, "discord.reset-complete");
+                    }
                     plugin.messages().send(sender, "ingame.reset-leaderboards.success",
                             FoMessageService.missingMessageFallback("ingame.reset-leaderboards.success"), Map.of(
                             "scope", describeLeaderboardResetScope(request),
@@ -425,12 +450,17 @@ public final class FoDiscordCommand implements Listener {
         inventory.setItem(CONTINUE_SLOT, EditorItemFactory.confirm());
 
         player.openInventory(inventory);
+        plugin.getGuiSounds().open(player);
         plugin.messages().sendConfigured(player, "ingame.reset-leaderboards.confirm-open");
     }
 
     private String normalizeResetScope(String input) {
         String normalized = input == null ? "" : input.trim().toLowerCase(Locale.ROOT);
         return normalized.isBlank() ? "all" : normalized;
+    }
+
+    private void commandError(CommandSender sender) {
+        plugin.getAdminSounds().updateError(sender);
     }
 
     private String describeLeaderboardResetScope(LeaderboardResetRequest request) {

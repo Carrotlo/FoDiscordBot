@@ -57,7 +57,7 @@ network:
     password: "change-me"
     use-ssl: false
     # Max MySQL connections used by this server. Raise this if many online
-    # players sync profiles/advancements at the same time.
+    # players sync profiles at the same time.
     pool-size: 8
     # How long a database operation may wait for a free connection.
     connection-timeout-seconds: 30
@@ -191,13 +191,6 @@ rank-sync:
 
       # Discord role ID to add when the player has the permission above.
       role-id: ""
-
-# FoAdvancements Discord integration.
-# This registers /advancements and syncs FoAdvancements snapshots in network mode.
-# Keep disabled unless FoAdvancements is installed on the gamemode servers that should publish progress.
-advancement:
-  # Master toggle for FoAdvancements Discord lookup and network sync.
-  enabled: false
 
 # Profile card configuration - displayed by /profile <target> <gamemode> in Discord.
 # In network mode each gamemode publishes its own profile snapshot to MySQL.

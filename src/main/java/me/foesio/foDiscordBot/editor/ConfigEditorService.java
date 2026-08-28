@@ -24,6 +24,7 @@ import me.foesio.core.gui.EntryBrowserRequest;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.core.message.FoStyle;
 import me.foesio.core.number.LargeNumberParser;
+import me.foesio.core.sound.FoEditorSounds;
 import me.foesio.core.text.PromptNormalizer;
 import me.foesio.foDiscordBot.FoDiscordBot;
 import org.bukkit.Bukkit;
@@ -41,6 +42,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 public final class ConfigEditorService implements Listener {
 
@@ -79,6 +81,7 @@ public final class ConfigEditorService implements Listener {
         }
 
         openMainMenu(player);
+        plugin.getEditorSounds().open(player);
         plugin.messages().sendConfigured(player, "ingame.editor.open");
         return true;
     }
@@ -120,6 +123,11 @@ public final class ConfigEditorService implements Listener {
 
         event.setCancelled(true);
         if (event.getClickedInventory() == null) {
+            return;
+        }
+
+        if (plugin.getAddons().stream().anyMatch(addon ->
+                addon.handleEditorClick(holder.view().name(), player, rawSlot))) {
             return;
         }
 
@@ -173,13 +181,13 @@ public final class ConfigEditorService implements Listener {
 
     private void handleMainClick(Player player, int slot) {
         switch (slot) {
-            case 10 -> openDiscordPage(player);
-            case 12 -> openChatBridgePage(player);
-            case 13 -> openLinkingPage(player);
-            case 15 -> openBoosterPage(player);
-            case 16 -> openNetworkPage(player);
-            case 11 -> openRankSyncPage(player);
-            case 14 -> openLeaderboardsPage(player);
+            case 10 -> { plugin.getEditorSounds().open(player); openDiscordPage(player); }
+            case 12 -> { plugin.getEditorSounds().open(player); openChatBridgePage(player); }
+            case 13 -> { plugin.getEditorSounds().open(player); openLinkingPage(player); }
+            case 15 -> { plugin.getEditorSounds().open(player); openBoosterPage(player); }
+            case 16 -> { plugin.getEditorSounds().open(player); openNetworkPage(player); }
+            case 11 -> { plugin.getEditorSounds().open(player); openRankSyncPage(player); }
+            case 14 -> { plugin.getEditorSounds().open(player); openLeaderboardsPage(player); }
             default -> {
             }
         }
@@ -200,8 +208,10 @@ public final class ConfigEditorService implements Listener {
                     "profile.footer", "profile footer", "text, none, or clear");
             case 16 -> beginTextInput(player, PendingInputType.SET_HEX, -1, EditorView.DISCORD, "",
                     "profile.embed-color", "profile embed color", "#RRGGBB");
-            case 19 -> openProfileFieldsPage(player);
-            case 20 -> toggleBoolean(player, "advancement.enabled", EditorView.DISCORD, "");
+            case 19 -> {
+                plugin.getEditorSounds().open(player);
+                openProfileFieldsPage(player);
+            }
             default -> {
             }
         }
@@ -232,9 +242,18 @@ public final class ConfigEditorService implements Listener {
             case 15 -> toggleBoolean(player, "linking.remove-link-message-after-success", EditorView.LINKING, "");
             case 16 -> beginTextInput(player, PendingInputType.SET_TEXT, -1, EditorView.LINKING, "",
                     "linking.linked-role-id", "linked role ID", "Discord role ID, none, or clear");
-            case 19 -> openCommandList(player, "linking.always-reward-commands", EditorView.LINKING, "");
-            case 20 -> openCommandList(player, "linking.one-time-reward-commands", EditorView.LINKING, "");
-            case 21 -> openCommandList(player, "linking.unlink-commands", EditorView.LINKING, "");
+            case 19 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "linking.always-reward-commands", EditorView.LINKING, "");
+            }
+            case 20 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "linking.one-time-reward-commands", EditorView.LINKING, "");
+            }
+            case 21 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "linking.unlink-commands", EditorView.LINKING, "");
+            }
             default -> {
             }
         }
@@ -245,9 +264,18 @@ public final class ConfigEditorService implements Listener {
             case 10 -> toggleBoolean(player, "booster.enabled", EditorView.BOOSTER, "");
             case 11 -> beginTextInput(player, PendingInputType.SET_TEXT, -1, EditorView.BOOSTER, "",
                     "booster.role-id", "booster role ID", "Discord role ID, or clear");
-            case 12 -> openCommandList(player, "booster.always-reward-commands", EditorView.BOOSTER, "");
-            case 13 -> openCommandList(player, "booster.one-time-reward-commands", EditorView.BOOSTER, "");
-            case 14 -> openCommandList(player, "booster.removal-commands", EditorView.BOOSTER, "");
+            case 12 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "booster.always-reward-commands", EditorView.BOOSTER, "");
+            }
+            case 13 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "booster.one-time-reward-commands", EditorView.BOOSTER, "");
+            }
+            case 14 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "booster.removal-commands", EditorView.BOOSTER, "");
+            }
             default -> {
             }
         }
@@ -283,10 +311,12 @@ public final class ConfigEditorService implements Listener {
         int page = currentPage(context, maxPage(keys.size()));
         int maxPage = maxPage(keys.size());
         if (slot == PREVIOUS_PAGE_SLOT && page > 0) {
+            plugin.getEditorSounds().previousPage(player);
             openRankSyncPage(player, page - 1);
             return;
         }
         if (slot == NEXT_PAGE_SLOT && page < maxPage) {
+            plugin.getEditorSounds().nextPage(player);
             openRankSyncPage(player, page + 1);
             return;
         }
@@ -295,6 +325,7 @@ public final class ConfigEditorService implements Listener {
             return;
         }
         if (slot == ADD_RANK_SLOT) {
+            plugin.getEditorSounds().add(player);
             beginTextInput(player, PendingInputType.ADD_RANK, -1, EditorView.RANK_SYNC, Integer.toString(page),
                     "", "rank mapping", "key | permission | role-id");
             return;
@@ -322,14 +353,17 @@ public final class ConfigEditorService implements Listener {
         int page = currentPage(context, maxPage(fields.size()));
         int maxPage = maxPage(fields.size());
         if (slot == PREVIOUS_PAGE_SLOT && page > 0) {
+            plugin.getEditorSounds().previousPage(player);
             openProfileFieldsPage(player, page - 1);
             return;
         }
         if (slot == NEXT_PAGE_SLOT && page < maxPage) {
+            plugin.getEditorSounds().nextPage(player);
             openProfileFieldsPage(player, page + 1);
             return;
         }
         if (slot == ADD_PROFILE_FIELD_SLOT) {
+            plugin.getEditorSounds().add(player);
             beginTextInput(player, PendingInputType.ADD_PROFILE_FIELD, -1, EditorView.PROFILE_FIELDS, Integer.toString(page),
                     "", "profile field", "name | value | inline true/false | same-line true/false");
             return;
@@ -356,10 +390,12 @@ public final class ConfigEditorService implements Listener {
         int page = currentPage(context, maxPage(aliases.size()));
         int maxPage = maxPage(aliases.size());
         if (slot == PREVIOUS_PAGE_SLOT && page > 0) {
+            plugin.getEditorSounds().previousPage(player);
             openLeaderboardsPage(player, page - 1);
             return;
         }
         if (slot == NEXT_PAGE_SLOT && page < maxPage) {
+            plugin.getEditorSounds().nextPage(player);
             openLeaderboardsPage(player, page + 1);
             return;
         }
@@ -369,6 +405,7 @@ public final class ConfigEditorService implements Listener {
             return;
         }
         if (slot == ADD_BOARD_SLOT) {
+            plugin.getEditorSounds().add(player);
             beginTextInput(player, PendingInputType.ADD_BOARD, -1, EditorView.LEADERBOARDS, Integer.toString(page),
                     "", "leaderboard board", "alias | title");
             return;
@@ -386,13 +423,14 @@ public final class ConfigEditorService implements Listener {
                     "leaderboards.boards." + alias, "board " + alias));
             return;
         }
-
+        plugin.getEditorSounds().open(player);
         openBoardPage(player, alias);
     }
 
     private void handleBoardClick(Player player, int slot, String alias) {
         if (alias == null || alias.isBlank() || !plugin.getConfig().contains("leaderboards.boards." + alias, true)) {
             plugin.messages().sendConfigured(player, "ingame.editor.invalid-input");
+            plugin.getEditorSounds().error(player);
             openLeaderboardsPage(player);
             return;
         }
@@ -404,7 +442,10 @@ public final class ConfigEditorService implements Listener {
                     "leaderboards.boards." + alias + ".footer", "board footer", "text, none, or clear");
             case 12 -> beginTextInput(player, PendingInputType.SET_TEXT, -1, EditorView.BOARD, alias,
                     "leaderboards.boards." + alias + ".empty-text", "empty text", "message shown when no entries exist");
-            case 13 -> openCommandList(player, "leaderboards.boards." + alias + ".lines", EditorView.BOARD, alias);
+            case 13 -> {
+                plugin.getEditorSounds().open(player);
+                openCommandList(player, "leaderboards.boards." + alias + ".lines", EditorView.BOARD, alias);
+            }
             case 16 -> openConfirmDelete(player, DeleteRequest.configPath(EditorView.BOARD, alias,
                     "leaderboards.boards." + alias, "board " + alias, EditorView.LEADERBOARDS, ""));
             default -> {
@@ -422,14 +463,17 @@ public final class ConfigEditorService implements Listener {
         int page = currentPage(Integer.toString(context.page()), maxPage(plugin.getConfig().getStringList(context.path()).size()));
         int maxPage = maxPage(plugin.getConfig().getStringList(context.path()).size());
         if (slot == PREVIOUS_PAGE_SLOT && page > 0) {
+            plugin.getEditorSounds().previousPage(player);
             openCommandList(player, context.path(), context.returnView(), context.returnContext(), page - 1);
             return;
         }
         if (slot == NEXT_PAGE_SLOT && page < maxPage) {
+            plugin.getEditorSounds().nextPage(player);
             openCommandList(player, context.path(), context.returnView(), context.returnContext(), page + 1);
             return;
         }
         if (slot == ADD_COMMAND_SLOT) {
+            plugin.getEditorSounds().add(player);
             beginTextInput(player, PendingInputType.ADD_COMMAND, -1, EditorView.COMMAND_LIST, encodedContext,
                     context.path(), commandListEntryName(context.path()), "plain text line");
             return;
@@ -454,6 +498,7 @@ public final class ConfigEditorService implements Listener {
 
     private void handleConfirmDeleteClick(Player player, int slot) {
         if (slot == 11) {
+            plugin.getEditorSounds().back(player);
             DeleteRequest request = pendingDeletes.remove(player.getUniqueId());
             player.closeInventory();
             if (request != null) {
@@ -469,8 +514,11 @@ public final class ConfigEditorService implements Listener {
         DeleteRequest request = pendingDeletes.remove(player.getUniqueId());
         player.closeInventory();
         if (request == null) {
+            plugin.getEditorSounds().error(player);
             return;
         }
+
+        plugin.getEditorSounds().delete(player);
 
         updateConfig(player, request.successView(), request.successContext(), config -> {
             if (request.kind() == DeleteKind.CONFIG_PATH) {
@@ -483,7 +531,7 @@ public final class ConfigEditorService implements Listener {
                 updated.remove(request.index());
             }
             config.set(request.path(), updated);
-        }, "editor.deleted", Map.of("target", request.label()));
+        }, "editor.deleted", Map.of("target", request.label()), false);
     }
 
     private void handlePendingInput(Player player, PendingInput pendingInput, String message) {
@@ -494,6 +542,7 @@ public final class ConfigEditorService implements Listener {
 
         if (message.isBlank()) {
             plugin.messages().sendConfigured(player, "ingame.editor.input-empty");
+            plugin.getEditorSounds().error(player);
             reopen(player, pendingInput.returnView(), pendingInput.returnContext());
             return;
         }
@@ -535,6 +584,7 @@ public final class ConfigEditorService implements Listener {
     private void handleColorInput(Player player, PendingInput pendingInput, String message) {
         if (!HEX_COLOR.matcher(message).matches()) {
             plugin.messages().sendConfigured(player, "ingame.editor.invalid-color");
+            plugin.getEditorSounds().error(player);
             reopen(player, pendingInput.returnView(), pendingInput.returnContext());
             return;
         }
@@ -634,6 +684,7 @@ public final class ConfigEditorService implements Listener {
 
     private void sendInvalidAndReopen(Player player, PendingInput pendingInput) {
         plugin.messages().sendConfigured(player, "ingame.editor.invalid-input");
+        plugin.getEditorSounds().error(player);
         reopen(player, pendingInput.returnView(), pendingInput.returnContext());
     }
 
@@ -652,11 +703,12 @@ public final class ConfigEditorService implements Listener {
         if (plugin.getCore() == null) {
             player.closeInventory();
             plugin.messages().sendConfigured(player, "ingame.editor.save-error");
+            plugin.getEditorSounds().error(player);
             return;
         }
 
         TextDialogRequest request = textDialogRequest(pendingInput, fieldName, format);
-        EditorDialogInputs.openTextFromInventory(
+        boolean openedNative = EditorDialogInputs.openTextFromInventory(
                 plugin,
                 plugin.getCore().inventoryCloseSuppressor(),
                 plugin.getCore().dialogService(),
@@ -665,6 +717,9 @@ public final class ConfigEditorService implements Listener {
                 value -> handlePendingInput(player, pendingInput, value == null ? "" : value.trim()),
                 () -> cancelPendingInput(player, pendingInput)
         );
+        if (openedNative) {
+            plugin.getEditorSounds().open(player);
+        }
     }
 
     private TextDialogRequest textDialogRequest(PendingInput pendingInput, String fieldName, String format) {
@@ -702,6 +757,7 @@ public final class ConfigEditorService implements Listener {
 
     private void cancelPendingInput(Player player, PendingInput pendingInput) {
         plugin.messages().sendConfigured(player, "ingame.editor.input-cancelled");
+        plugin.getEditorSounds().back(player);
         reopen(player, pendingInput.returnView(), pendingInput.returnContext());
     }
 
@@ -766,15 +822,23 @@ public final class ConfigEditorService implements Listener {
     }
 
     private void toggleBoolean(Player player, String path, EditorView returnView, String returnContext) {
-        updateConfig(player, returnView, returnContext, config -> config.set(path, !config.getBoolean(path, false)), "editor.saved");
+        boolean enabled = !plugin.getConfig().getBoolean(path, false);
+        if (updateConfig(player, returnView, returnContext, config -> config.set(path, enabled), "editor.saved", Map.of(), false)) {
+            plugin.getEditorSounds().toggle(player, enabled);
+        }
     }
 
-    private void updateConfig(Player player, EditorView returnView, String returnContext, Consumer<FileConfiguration> mutator, String messagePath) {
-        updateConfig(player, returnView, returnContext, mutator, messagePath, Map.of());
+    private boolean updateConfig(Player player, EditorView returnView, String returnContext, Consumer<FileConfiguration> mutator, String messagePath) {
+        return updateConfig(player, returnView, returnContext, mutator, messagePath, Map.of(), true);
     }
 
-    private void updateConfig(Player player, EditorView returnView, String returnContext, Consumer<FileConfiguration> mutator,
-                              String messagePath, Map<String, String> placeholders) {
+    private boolean updateConfig(Player player, EditorView returnView, String returnContext, Consumer<FileConfiguration> mutator,
+                                 String messagePath, Map<String, String> placeholders) {
+        return updateConfig(player, returnView, returnContext, mutator, messagePath, placeholders, true);
+    }
+
+    private boolean updateConfig(Player player, EditorView returnView, String returnContext, Consumer<FileConfiguration> mutator,
+                                 String messagePath, Map<String, String> placeholders, boolean playSaveSound) {
         boolean success = false;
         try {
             mutator.accept(plugin.getConfig());
@@ -786,11 +850,16 @@ public final class ConfigEditorService implements Listener {
         if (!success) {
             plugin.reloadConfig();
             plugin.messages().sendConfigured(player, "ingame.editor.save-error");
+            plugin.getEditorSounds().error(player);
         } else {
             String path = "ingame." + messagePath;
             plugin.messages().send(player, path, FoMessageService.missingMessageFallback(path), placeholders);
+            if (playSaveSound) {
+                plugin.getEditorSounds().save(player);
+            }
         }
         reopen(player, returnView, returnContext);
+        return success;
     }
 
     private void reopen(Player player, EditorView view, String context) {
@@ -840,9 +909,30 @@ public final class ConfigEditorService implements Listener {
         inventory.setItem(15, valueItem(Material.BOOK, "Footer", blankAsNone(plugin.getConfig().getString("profile.footer", "")), "Click to type footer."));
         inventory.setItem(16, valueItem(Material.FIREWORK_STAR, "Embed Color", displayHex(plugin.getConfig().getString("profile.embed-color", FoStyle.THEME)), "Click to type hex color."));
         inventory.setItem(19, listPageItem(Material.WRITABLE_BOOK, "Profile Fields", "profile.fields"));
-        inventory.setItem(20, EditorItemFactory.toggle("FoAdvancements Lookup", plugin.getConfig().getBoolean("advancement.enabled", false)));
+        plugin.getAddons().forEach(addon -> addon.populateEditor("DISCORD", inventory));
         addFooter(inventory, true);
         player.openInventory(inventory);
+    }
+
+    public void reopenDiscordPage(Player player) {
+        if (player != null && player.isOnline()) {
+            openDiscordPage(player);
+        }
+    }
+
+    public ItemStack createAddonToggleItem(String label, boolean enabled, List<String> addonLore) {
+        ItemStack item = EditorItemFactory.toggle(label, enabled);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return item;
+        }
+        List<String> lore = new ArrayList<>(meta.getLore() == null ? List.of() : meta.getLore());
+        if (addonLore != null) {
+            lore.addAll(addonLore.stream().map(line -> FoStyle.WHITE + line).toList());
+        }
+        meta.setLore(lore);
+        item.setItemMeta(meta);
+        return item;
     }
 
     private void openChatBridgePage(Player player) {
@@ -1072,13 +1162,31 @@ public final class ConfigEditorService implements Listener {
         String filter = holder.request().filter();
         switch (click.action()) {
             case ENTRY -> handleEntryBrowserEntry(player, context, click, page, filter);
-            case ADD -> handleEntryBrowserAdd(player, context, page);
+            case ADD -> {
+                plugin.getEditorSounds().add(player);
+                handleEntryBrowserAdd(player, context, page);
+            }
             case EXTRA -> handleEntryBrowserExtra(player, context, page);
-            case BACK -> reopen(player, context.parent(), context.parentContext());
-            case SEARCH -> beginEntryBrowserSearch(player, context, page, filter);
-            case CLEAR_SEARCH -> openEntryBrowserForContext(player, context, "", 0);
-            case PREVIOUS_PAGE -> openEntryBrowserForContext(player, context, filter, page - 1);
-            case NEXT_PAGE -> openEntryBrowserForContext(player, context, filter, page + 1);
+            case BACK -> {
+                plugin.getEditorSounds().back(player);
+                reopen(player, context.parent(), context.parentContext());
+            }
+            case SEARCH -> {
+                plugin.getEditorSounds().search(player);
+                beginEntryBrowserSearch(player, context, page, filter);
+            }
+            case CLEAR_SEARCH -> {
+                plugin.getEditorSounds().clearSearch(player);
+                openEntryBrowserForContext(player, context, "", 0);
+            }
+            case PREVIOUS_PAGE -> {
+                plugin.getEditorSounds().previousPage(player);
+                openEntryBrowserForContext(player, context, filter, page - 1);
+            }
+            case NEXT_PAGE -> {
+                plugin.getEditorSounds().nextPage(player);
+                openEntryBrowserForContext(player, context, filter, page + 1);
+            }
             case NONE -> {
             }
         }
@@ -1110,6 +1218,7 @@ public final class ConfigEditorService implements Listener {
             if (click.clickType() != null && click.clickType().isRightClick()) {
                 openConfirmDelete(player, DeleteRequest.configPath(EditorView.LEADERBOARDS, String.valueOf(page), "leaderboards.boards." + entryId, "board " + entryId));
             } else {
+                plugin.getEditorSounds().open(player);
                 openBoardPage(player, entryId);
             }
             return;
@@ -1168,15 +1277,21 @@ public final class ConfigEditorService implements Listener {
                 true,
                 false
         );
-        EditorDialogInputs.openTextFromInventory(
+        boolean openedNative = EditorDialogInputs.openTextFromInventory(
                 plugin,
                 plugin.getCore().inventoryCloseSuppressor(),
                 plugin.getCore().dialogService(),
                 player,
                 request,
                 value -> openEntryBrowserForContext(player, context, normalizeFilter(value), 0),
-                () -> openEntryBrowserForContext(player, context, filter, page)
+                () -> {
+                    plugin.getEditorSounds().back(player);
+                    openEntryBrowserForContext(player, context, filter, page);
+                }
         );
+        if (openedNative) {
+            plugin.getEditorSounds().open(player);
+        }
     }
 
     private void openEntryBrowserForContext(Player player, DiscordBrowserContext context, String filter, int page) {
@@ -1220,6 +1335,7 @@ public final class ConfigEditorService implements Listener {
         inventory.setItem(11, EditorItemFactory.cancel());
         inventory.setItem(15, EditorItemFactory.confirm());
         player.openInventory(inventory);
+        plugin.getEditorSounds().open(player);
     }
 
     private Inventory createInventory(Player player, EditorView view, String context, String title, int size) {
@@ -1288,6 +1404,8 @@ public final class ConfigEditorService implements Listener {
         if (slot != backSlot(holder.getInventory())) {
             return false;
         }
+
+        plugin.getEditorSounds().back(player);
 
         switch (holder.view()) {
             case MAIN -> player.closeInventory();

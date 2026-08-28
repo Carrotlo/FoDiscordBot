@@ -182,20 +182,3 @@ discord:
 
     # No data available for requested leaderboard.
     no-data: "That leaderboard has no data yet."
-
-  advancements:
-    # Advancement integration is disabled in config.yml.
-    disabled: "Advancement lookups are disabled."
-
-    # FoAdvancements is not installed on the requested gamemode.
-    unavailable: "Advancements are unavailable for that gamemode right now."
-
-    # Player not found for advancement lookup.
-    not-found: "I couldn't find advancement data for that player."
-
-    # Unknown gamemode id.
-    # Placeholders: {gamemode}
-    unknown-gamemode: "Unknown gamemode `{gamemode}`."
-
-    # Button session expired.
-    expired: "That advancement view expired. Run `/advancements` again."

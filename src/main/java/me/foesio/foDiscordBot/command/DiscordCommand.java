@@ -22,7 +22,16 @@ public final class DiscordCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!sender.hasPermission("fodiscord.use")) {
+            plugin.messages().send(sender, "ingame.no-permission",
+                    FoMessageService.missingMessageFallback("ingame.no-permission"), Map.of());
+            plugin.getAdminSounds().updateError(sender);
+            return true;
+        }
         if (!plugin.getPluginConfig().hasConfiguredBotToken()) {
+            if (sender instanceof Player player) {
+                plugin.getAdminSounds().updateError(player);
+            }
             plugin.messages().send(sender, "ingame.discord.not-configured",
                     FoMessageService.missingMessageFallback("ingame.discord.not-configured"), Map.of());
             return true;
@@ -42,6 +51,7 @@ public final class DiscordCommand implements CommandExecutor {
                 new ComponentBuilder(plugin.messages().render("ingame.discord.hover",
                         FoMessageService.missingMessageFallback("ingame.discord.hover"), Map.of())).create()));
         player.spigot().sendMessage(message);
+        plugin.getSounds().play(player, "discord.invite");
         return true;
     }
 }

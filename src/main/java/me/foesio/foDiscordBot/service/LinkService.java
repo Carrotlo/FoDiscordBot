@@ -166,6 +166,7 @@ public final class LinkService {
             DiscordLinkResponse response = mapDiscordResult(result);
             if (response.status() == DiscordLinkStatus.SUCCESS) {
                 addLinkedRole(response.account());
+                notifyOnlineLinkCompleted(response.account());
                 claimOnlineGamemodeReward(response.account());
                 syncOnlineRankRoles(response.account());
             }
@@ -194,6 +195,7 @@ public final class LinkService {
                     UnlinkResult unlinkResult = repository.unlinkPlayer(account.playerUuid(), account.playerName(), Instant.now());
                     if (unlinkResult.status() == UnlinkResult.Status.SUCCESS) {
                         removeLinkedRole(unlinkResult.account());
+                        notifyOnlineUnlinked(unlinkResult.account());
                         return new DiscordUnlinkResponse(DiscordUnlinkStatus.SUCCESS, unlinkResult.account());
                     }
                     return new DiscordUnlinkResponse(DiscordUnlinkStatus.NOT_LINKED, null);
@@ -252,6 +254,30 @@ public final class LinkService {
         });
     }
 
+    private void notifyOnlineLinkCompleted(LinkedAccount account) {
+        if (account == null) {
+            return;
+        }
+        plugin.getCore().scheduler().runGlobal(() -> {
+            Player player = Bukkit.getPlayer(account.playerUuid());
+            if (player != null && player.isOnline()) {
+                plugin.getSounds().play(player, "discord.linked");
+            }
+        });
+    }
+
+    private void notifyOnlineUnlinked(LinkedAccount account) {
+        if (account == null) {
+            return;
+        }
+        plugin.getCore().scheduler().runGlobal(() -> {
+            Player player = Bukkit.getPlayer(account.playerUuid());
+            if (player != null && player.isOnline()) {
+                plugin.getSounds().play(player, "discord.unlink");
+            }
+        });
+    }
+
     private void syncOnlineRankRoles(LinkedAccount account) {
         if (account == null || plugin.getRankSyncService() == null) {
             return;
@@ -285,6 +311,7 @@ public final class LinkService {
                             FoMessageService.missingMessageFallback("ingame.rewards.success"), Map.of(
                             "gamemode", plugin.getPluginConfig().normalizedGamemodeId()
                     ));
+                    plugin.getSounds().playWithPitchVariation(player, "discord.reward", 0.05f);
                 }
                 if (response.status() == LinkRewardStatus.SUCCESS || response.status() == LinkRewardStatus.ALREADY_CLAIMED) {
                     plugin.getNetworkSyncService().syncPlayerNow(player);

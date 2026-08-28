@@ -11,7 +11,13 @@ import me.foesio.core.message.FoStyle;
 import me.foesio.core.plugin.FoPluginTitle;
 import me.foesio.core.reload.FoReloadRegistry;
 import me.foesio.core.reload.FoReloadResult;
+import me.foesio.core.sound.FoAdminSounds;
+import me.foesio.core.sound.FoEditorSounds;
+import me.foesio.core.sound.FoGuiSounds;
+import me.foesio.core.sound.FoSoundService;
 import me.foesio.core.update.UpdateNoticeService;
+import me.foesio.foDiscordBot.api.DatabaseAction;
+import me.foesio.foDiscordBot.api.FoDiscordBotAddon;
 import me.foesio.foDiscordBot.command.DiscordCommand;
 import me.foesio.foDiscordBot.command.FoDiscordCommand;
 import me.foesio.foDiscordBot.command.LinkCommand;
@@ -20,7 +26,6 @@ import me.foesio.foDiscordBot.config.PluginConfig;
 import me.foesio.foDiscordBot.editor.ConfigEditorService;
 import me.foesio.foDiscordBot.listener.ChatRelayListener;
 import me.foesio.foDiscordBot.listener.PlayerActivityListener;
-import me.foesio.foDiscordBot.service.AdvancementService;
 import me.foesio.foDiscordBot.service.BoosterService;
 import me.foesio.foDiscordBot.service.DiscordBotManager;
 import me.foesio.foDiscordBot.service.LeaderboardService;
@@ -35,6 +40,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.event.HandlerList;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -42,6 +48,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 
 public final class FoDiscordBot extends JavaPlugin {
@@ -99,7 +106,6 @@ public final class FoDiscordBot extends JavaPlugin {
     private LinkService linkService;
     private ProfileService profileService;
     private LeaderboardService leaderboardService;
-    private AdvancementService advancementService;
     private DiscordBotManager discordBotManager;
     private ConfigEditorService configEditorService;
     private NetworkSyncService networkSyncService;
@@ -107,8 +113,13 @@ public final class FoDiscordBot extends JavaPlugin {
     private RankSyncService rankSyncService;
     private SkinAvatarService skinAvatarService;
     private FoCoreContext core;
+    private FoSoundService sounds;
+    private FoAdminSounds adminSounds;
+    private FoEditorSounds editorSounds;
+    private FoGuiSounds guiSounds;
     private UpdateNoticeService updateNoticeService;
     private CommandVisibilityService commandVisibilityService;
+    private final List<FoDiscordBotAddon> addons = new CopyOnWriteArrayList<>();
 
     @Override
     public void onEnable() {
@@ -123,7 +134,11 @@ public final class FoDiscordBot extends JavaPlugin {
             this.core = FoPluginCore.create(this);
             this.core.metrics(33179);
             this.core.warnIfNativeDialogsUnavailable();
-            this.updateNoticeService = core.createUpdateNotices(messages, "fodiscordbot");
+            this.sounds = core.createSounds();
+            this.adminSounds = FoAdminSounds.create(sounds);
+            this.editorSounds = FoEditorSounds.create(sounds);
+            this.guiSounds = FoGuiSounds.create(sounds);
+            this.updateNoticeService = core.createUpdateNotices(messages, "fodiscordbot", adminSounds);
             reloadConfiguration();
 
             this.linkRepository = new LinkRepository(this);
@@ -133,10 +148,9 @@ public final class FoDiscordBot extends JavaPlugin {
             this.profileService = new ProfileService(this, linkRepository);
             this.linkService = new LinkService(this, linkRepository);
             this.leaderboardService = new LeaderboardService(this, linkRepository);
-            this.advancementService = new AdvancementService(this, linkRepository);
-            this.discordBotManager = new DiscordBotManager(this, linkService, profileService, leaderboardService, advancementService);
+            this.discordBotManager = new DiscordBotManager(this, linkService, profileService, leaderboardService);
             this.configEditorService = new ConfigEditorService(this);
-            this.networkSyncService = new NetworkSyncService(this, profileService, leaderboardService, advancementService);
+            this.networkSyncService = new NetworkSyncService(this, profileService, leaderboardService);
             this.boosterService = new BoosterService(this, linkRepository);
             this.rankSyncService = new RankSyncService(this, linkRepository);
 
@@ -162,11 +176,17 @@ public final class FoDiscordBot extends JavaPlugin {
             commandVisibilityService.close();
             commandVisibilityService = null;
         }
+        for (FoDiscordBotAddon addon : List.copyOf(addons)) {
+            unregisterAddon(addon);
+        }
         if (core != null) {
             core.close();
             core = null;
-            updateNoticeService = null;
         }
+        if (updateNoticeService != null) {
+            HandlerList.unregisterAll(updateNoticeService);
+        }
+        updateNoticeService = null;
         if (discordBotManager != null) {
             discordBotManager.shutdown();
         }
@@ -210,7 +230,6 @@ public final class FoDiscordBot extends JavaPlugin {
             ensureCoreConfigDefaults();
             mergeMissingConfigDefaults();
             ensureLeaderboardBoardFooters();
-            ensureAdvancementConfig();
             removeLegacyMessagesConfig();
             saveConfig();
             FoReloadResult result = createReloadRegistry(true, false, previous).reload();
@@ -288,10 +307,6 @@ public final class FoDiscordBot extends JavaPlugin {
         return skinAvatarService;
     }
 
-    public AdvancementService getAdvancementService() {
-        return advancementService;
-    }
-
     public FoCoreContext getCore() {
         return core;
     }
@@ -300,8 +315,72 @@ public final class FoDiscordBot extends JavaPlugin {
         return updateNoticeService;
     }
 
+    public FoSoundService getSounds() {
+        return sounds;
+    }
+
+    public FoAdminSounds getAdminSounds() {
+        return adminSounds;
+    }
+
+    public FoEditorSounds getEditorSounds() {
+        return editorSounds;
+    }
+
+    public FoGuiSounds getGuiSounds() {
+        return guiSounds;
+    }
+
     public boolean hasPlaceholderApi() {
         return getServer().getPluginManager().getPlugin("PlaceholderAPI") != null;
+    }
+
+    public List<FoDiscordBotAddon> getAddons() {
+        return List.copyOf(addons);
+    }
+
+    public synchronized boolean registerAddon(FoDiscordBotAddon addon) {
+        if (addon == null || addon.id() == null || addon.id().isBlank()) {
+            return false;
+        }
+        if (addons.stream().anyMatch(existing -> existing.id().equalsIgnoreCase(addon.id()))) {
+            return false;
+        }
+        addons.add(addon);
+        try {
+            addon.onRegister(this);
+            logInfo("Registered addon " + addon.id() + ".");
+            return true;
+        } catch (RuntimeException exception) {
+            addons.remove(addon);
+            logSevere("Failed to register addon " + addon.id() + ": " + exception.getMessage(), exception);
+            return false;
+        }
+    }
+
+    public synchronized void unregisterAddon(FoDiscordBotAddon addon) {
+        if (addon == null || !addons.remove(addon)) {
+            return;
+        }
+        try {
+            addon.onUnregister();
+        } catch (RuntimeException exception) {
+            logWarning("Failed to unregister addon " + addon.id() + ": " + exception.getMessage());
+        }
+    }
+
+    public <T> T withDatabase(DatabaseAction<T> action) throws java.sql.SQLException {
+        if (linkRepository == null) {
+            throw new java.sql.SQLException("FoDiscordBot database is not initialized.");
+        }
+        return linkRepository.withConnection(action);
+    }
+
+    public java.sql.Connection openDatabaseConnection() throws java.sql.SQLException {
+        if (linkRepository == null) {
+            throw new java.sql.SQLException("FoDiscordBot database is not initialized.");
+        }
+        return linkRepository.openConnection();
     }
 
     private void reloadConfiguration() {
@@ -316,10 +395,9 @@ public final class FoDiscordBot extends JavaPlugin {
         boolean boosterMigrated = migrateLegacyBoosterRewardConfig();
         boolean merged = mergeMissingConfigDefaults();
         boolean boardFooters = ensureLeaderboardBoardFooters();
-        boolean advancementConfig = ensureAdvancementConfig();
         boolean messagesRemoved = removeLegacyMessagesConfig();
         if (coreDefaults || migrated || linkMigrated || boosterMigrated || merged
-                || boardFooters || advancementConfig || messagesRemoved) {
+                || boardFooters || messagesRemoved) {
             saveConfig();
         }
         reloadConfig();
@@ -344,7 +422,9 @@ public final class FoDiscordBot extends JavaPlugin {
                                                    PluginConfig previousConfig) {
         FoReloadRegistry registry = FoReloadRegistry.create()
                 .add("config", this::reloadConfigAndApplyDefaults)
-                .add("core-context", this::refreshCoreContext);
+                .add("core-context", this::refreshCoreContext)
+                .add("sounds", () -> sounds.reload());
+        registry.add("addons", () -> addons.forEach(FoDiscordBotAddon::onConfigReload));
         if (messages != null) {
             registry.addMessages(messages);
         }
@@ -388,10 +468,9 @@ public final class FoDiscordBot extends JavaPlugin {
         boolean boosterMigrated = migrateLegacyBoosterRewardConfig();
         boolean merged = mergeMissingConfigDefaults();
         boolean boardFooters = ensureLeaderboardBoardFooters();
-        boolean advancementConfig = ensureAdvancementConfig();
         boolean messagesRemoved = removeLegacyMessagesConfig();
         if (coreDefaults || migrated || linkMigrated || boosterMigrated || merged
-                || boardFooters || advancementConfig || messagesRemoved) {
+                || boardFooters || messagesRemoved) {
             saveConfig();
             reloadConfig();
         }
@@ -447,6 +526,10 @@ public final class FoDiscordBot extends JavaPlugin {
     }
 
     private void refreshCoreContext() {
+        if (updateNoticeService != null) {
+            HandlerList.unregisterAll(updateNoticeService);
+        }
+        updateNoticeService = null;
         FoCoreContext previous = core;
         if (previous != null) {
             previous.close();
@@ -454,7 +537,15 @@ public final class FoDiscordBot extends JavaPlugin {
         FoCoreContext next = FoPluginCore.create(this);
         next.metrics(33179);
         next.warnIfNativeDialogsUnavailable();
+        sounds = next.createSounds();
+        adminSounds = FoAdminSounds.create(sounds);
+        editorSounds = FoEditorSounds.create(sounds);
+        guiSounds = FoGuiSounds.create(sounds);
         core = next;
+        if (messages != null) {
+            updateNoticeService = core.createUpdateNotices(messages, "fodiscordbot", adminSounds);
+            updateNoticeService.registerJoinListener();
+        }
     }
 
     private boolean mergeMissingConfigDefaults() {
@@ -486,23 +577,6 @@ public final class FoDiscordBot extends JavaPlugin {
             }
 
             board.set("footer", legacyFooter);
-            changed = true;
-        }
-        return changed;
-    }
-
-    private boolean ensureAdvancementConfig() {
-        boolean changed = false;
-        if (getConfig().contains("advancements.enabled", true)) {
-            getConfig().set("advancement.enabled", getConfig().getBoolean("advancements.enabled", false));
-            changed = true;
-        }
-        if (getConfig().contains("advancements", true)) {
-            getConfig().set("advancements", null);
-            changed = true;
-        }
-        if (!getConfig().contains("advancement.enabled", true)) {
-            getConfig().set("advancement.enabled", false);
             changed = true;
         }
         return changed;
@@ -703,6 +777,7 @@ public final class FoDiscordBot extends JavaPlugin {
                 .commandName("fodiscordbotadmin")
                 .permission(ADMIN_PERMISSION)
                 .versionCommand(false)
+                .adminSounds(adminSounds)
                 .adminMessages(foDiscordCommand.adminMessages())
                 .addSubcommand(foDiscordCommand.versionSubcommand())
                 .addSubcommand(foDiscordCommand.reloadSubcommand())
@@ -749,7 +824,6 @@ public final class FoDiscordBot extends JavaPlugin {
                 || previous.shouldRunDiscordNode() != current.shouldRunDiscordNode()
                 || previous.serverIpCommandEnabled() != current.serverIpCommandEnabled()
                 || previous.networkEnabled() != current.networkEnabled()
-                || previous.advancementEnabled() != current.advancementEnabled()
                 || (previousGuildId == null ? currentGuildId != null : !previousGuildId.equals(currentGuildId));
     }
 }

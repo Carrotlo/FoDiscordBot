@@ -18,6 +18,12 @@ public final class UnlinkCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!sender.hasPermission("fodiscord.use")) {
+            plugin.messages().send(sender, "ingame.no-permission",
+                    FoMessageService.missingMessageFallback("ingame.no-permission"), Map.of());
+            plugin.getAdminSounds().updateError(sender);
+            return true;
+        }
         if (!(sender instanceof Player player)) {
             plugin.messages().send(sender, "ingame.players-only",
                     FoMessageService.missingMessageFallback("ingame.players-only"), Map.of());
@@ -31,14 +37,21 @@ public final class UnlinkCommand implements CommandExecutor {
                     if (throwable != null) {
                         plugin.messages().send(player, "ingame.unlink.error",
                                 FoMessageService.missingMessageFallback("ingame.unlink.error"), Map.of());
+                        plugin.getAdminSounds().updateError(player);
                         return;
                     }
 
                     switch (response.status()) {
-                        case SUCCESS -> plugin.messages().send(player, "ingame.unlink.success",
-                                FoMessageService.missingMessageFallback("ingame.unlink.success"), Map.of());
-                        case NOT_LINKED -> plugin.messages().send(player, "ingame.unlink.not-linked",
-                                FoMessageService.missingMessageFallback("ingame.unlink.not-linked"), Map.of());
+                        case SUCCESS -> {
+                            plugin.messages().send(player, "ingame.unlink.success",
+                                    FoMessageService.missingMessageFallback("ingame.unlink.success"), Map.of());
+                            plugin.getSounds().play(player, "discord.unlink");
+                        }
+                        case NOT_LINKED -> {
+                            plugin.getAdminSounds().updateError(player);
+                            plugin.messages().send(player, "ingame.unlink.not-linked",
+                                    FoMessageService.missingMessageFallback("ingame.unlink.not-linked"), Map.of());
+                        }
                     }
                 }));
         return true;

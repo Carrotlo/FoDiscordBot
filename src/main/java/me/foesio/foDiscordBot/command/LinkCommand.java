@@ -23,6 +23,12 @@ public final class LinkCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!sender.hasPermission("fodiscord.use")) {
+            plugin.messages().send(sender, "ingame.no-permission",
+                    FoMessageService.missingMessageFallback("ingame.no-permission"), Map.of());
+            plugin.getAdminSounds().updateError(sender);
+            return true;
+        }
         if (!(sender instanceof Player player)) {
             plugin.messages().send(sender, "ingame.players-only",
                     FoMessageService.missingMessageFallback("ingame.players-only"), Map.of());
@@ -30,6 +36,7 @@ public final class LinkCommand implements CommandExecutor {
         }
 
         if (!plugin.getPluginConfig().hasConfiguredBotToken()) {
+            plugin.getAdminSounds().updateError(player);
             plugin.messages().send(sender, "ingame.discord.not-configured",
                     FoMessageService.missingMessageFallback("ingame.discord.not-configured"), Map.of());
             return true;
@@ -42,17 +49,27 @@ public final class LinkCommand implements CommandExecutor {
                     if (throwable != null) {
                         plugin.messages().send(player, "ingame.link.error",
                                 FoMessageService.missingMessageFallback("ingame.link.error"), Map.of());
+                        plugin.getAdminSounds().updateError(player);
                         return;
                     }
 
                     switch (response.status()) {
-                        case SUCCESS -> sendClickableLinkMessage(player, response.code().code());
-                        case COOLDOWN -> plugin.messages().send(player, "ingame.link.cooldown",
-                                FoMessageService.missingMessageFallback("ingame.link.cooldown"), Map.of(
-                                "seconds", String.valueOf(Math.max(1L, response.remaining().toSeconds()))
-                        ));
-                        case ALREADY_LINKED -> plugin.messages().send(player, "ingame.link.already-linked",
-                                FoMessageService.missingMessageFallback("ingame.link.already-linked"), Map.of());
+                        case SUCCESS -> {
+                            sendClickableLinkMessage(player, response.code().code());
+                            plugin.getSounds().play(player, "discord.link");
+                        }
+                        case COOLDOWN -> {
+                            plugin.getAdminSounds().updateError(player);
+                            plugin.messages().send(player, "ingame.link.cooldown",
+                                    FoMessageService.missingMessageFallback("ingame.link.cooldown"), Map.of(
+                                    "seconds", String.valueOf(Math.max(1L, response.remaining().toSeconds()))
+                            ));
+                        }
+                        case ALREADY_LINKED -> {
+                            plugin.getAdminSounds().updateError(player);
+                            plugin.messages().send(player, "ingame.link.already-linked",
+                                    FoMessageService.missingMessageFallback("ingame.link.already-linked"), Map.of());
+                        }
                     }
                 }));
         return true;

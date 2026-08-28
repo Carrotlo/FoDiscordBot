@@ -59,10 +59,19 @@ public final class BoosterService {
                         plugin.logWarning("Failed to process booster rewards for " + player.getName() + ": " + throwable.getMessage());
                         return;
                     }
-                    if (result == RewardApplyResult.GRANTED && player.isOnline()) {
-                        sendMessage(player, "booster.success", gamemodeId);
-                    } else if (result == RewardApplyResult.REMOVED && player.isOnline()) {
-                        sendMessage(player, "booster.removed", gamemodeId);
+                    if ((result == RewardApplyResult.GRANTED || result == RewardApplyResult.REMOVED) && player.isOnline()) {
+                        plugin.getCore().scheduler().runForPlayer(player, () -> {
+                            if (!player.isOnline()) {
+                                return;
+                            }
+                            if (result == RewardApplyResult.GRANTED) {
+                                sendMessage(player, "booster.success", gamemodeId);
+                                plugin.getSounds().playWithPitchVariation(player, "discord.booster-granted", 0.04f);
+                            } else {
+                                sendMessage(player, "booster.removed", gamemodeId);
+                                plugin.getSounds().play(player, "discord.booster-removed");
+                            }
+                        });
                     }
                 });
     }
