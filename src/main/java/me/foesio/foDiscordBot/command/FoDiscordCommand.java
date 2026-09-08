@@ -22,6 +22,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -47,7 +48,6 @@ public final class FoDiscordCommand implements Listener {
                 .reloadSuccess("ingame.reload.success", FoMessageService.missingMessageFallback("ingame.reload.success"))
                 .reloadFailed("ingame.reload.error", FoMessageService.missingMessageFallback("ingame.reload.error"))
                 .editorOpened("ingame.editor.open", FoMessageService.missingMessageFallback("ingame.editor.open"))
-                .versionCurrent("ingame.version.current", FoMessageService.missingMessageFallback("ingame.version.current"))
                 .build();
     }
 
@@ -140,12 +140,6 @@ public final class FoDiscordCommand implements Listener {
     }
 
     private void handleVersion(CommandSender sender) {
-        plugin.messages().send(sender, "ingame.version.author",
-                FoMessageService.missingMessageFallback("ingame.version.author"), Map.of("author", "Carrotio"));
-        plugin.messages().send(sender, "ingame.version.current",
-                FoMessageService.missingMessageFallback("ingame.version.current"), Map.of(
-                "version", plugin.getDescription().getVersion()
-        ));
         plugin.getUpdateNoticeService().checkAndSendVersion(sender);
     }
 
@@ -183,6 +177,14 @@ public final class FoDiscordCommand implements Listener {
             player.closeInventory();
             plugin.getGuiSounds().confirm(player);
             executeReset(player, request);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() instanceof ResetConfirmationHolder
+                || event.getInventory().getHolder() instanceof LeaderboardResetConfirmationHolder) {
+            event.setCancelled(true);
         }
     }
 

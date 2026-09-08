@@ -1,5 +1,10 @@
+# Edit optional item icons here. Remove any :icon: token to hide it.
+# Unsupported servers, older Java clients, and Bedrock players automatically receive clean text without item sprites.
 # Message configuration. FoPluginCore owns shared style tokens and formatting.
 # Minecraft messages use {prefix}; Discord messages remain plugin-specific text.
+
+tokens:
+  prefix: ":comparator: #03fc88FoDiscordBot &8» #a7b8b0"
 
 ingame:
   # Missing permission for admin commands.
@@ -17,7 +22,7 @@ ingame:
 
     # Link code generated successfully.
     # Placeholders: {code}, {minutes}
-    generated: "#a7b8b0Code #03fc88{code} #a7b8b0expires in #03fc88{minutes}m#a7b8b0."
+    generated: "{prefix}:paper: #a7b8b0Code #03fc88{code} #a7b8b0expires in #03fc88{minutes}m#a7b8b0."
 
     # Hover text for clickable link code.
     copy-hover: "#03fc88Copy #a7b8b0Discord link command."
@@ -27,11 +32,11 @@ ingame:
     cooldown: "#a7b8b0Wait #03fc88{seconds}s#a7b8b0."
 
     # Error occurred while generating link code.
-    error: "#ff5d73Failed #a7b8b0to create link code."
+    error: "{prefix}:redstone: #ff5d73Failed #a7b8b0to create link code."
 
   unlink:
     # Successfully unlinked Discord account.
-    success: "#3ecf8eUnlinked #03fc88Discord#a7b8b0."
+    success: "{prefix}:emerald: #3ecf8eUnlinked #03fc88Discord#a7b8b0."
 
     # No Discord account linked to unlink.
     not-linked: "#a7b8b0Not linked."
@@ -42,11 +47,11 @@ ingame:
   rewards:
     # Automatic link rewards were granted for this gamemode.
     # Placeholders: {gamemode}
-    success: "#3ecf8eClaimed #03fc88{gamemode} #a7b8b0rewards."
+    success: "{prefix}:emerald: #3ecf8eClaimed #03fc88{gamemode} #a7b8b0rewards."
 
   booster:
-    success: "#3ecf8eEnabled #03fc88{gamemode} #a7b8b0booster."
-    removed: "#ff5d73Disabled #03fc88{gamemode} #a7b8b0booster."
+    success: "{prefix}:emerald: #3ecf8eEnabled #03fc88{gamemode} #a7b8b0booster."
+    removed: "{prefix}:redstone: #ff5d73Disabled #03fc88{gamemode} #a7b8b0booster."
 
   discord:
     # Discord invite command message.
@@ -61,17 +66,13 @@ ingame:
 
   reload:
     # Plugin reloaded successfully.
-    success: "#3ecf8eReloaded #03fc88FoDiscordBot#a7b8b0."
+    success: "{prefix}:emerald: #3ecf8eReloaded #03fc88FoDiscordBot#a7b8b0."
 
     # Plugin reload failed.
-    error: "#ff5d73Failed #a7b8b0check console."
+    error: "{prefix}:redstone: #ff5d73Failed #a7b8b0check console."
 
     # Incorrect command usage.
     usage: "#a7b8b0Use #03fc88/fodiscordbotadmin <version|reload|editor|resetrewards|resetleaderboards>#a7b8b0."
-
-  version:
-    author: "#a7b8b0Author #03fc88{author}#a7b8b0."
-    current: "#a7b8b0Plugin version #03fc88{version}#a7b8b0."
 
   reset-rewards:
     usage: "#a7b8b0Use #03fc88/fodiscordbotadmin resetrewards <linked|booster> <player|discord|all> [gamemode]#a7b8b0."
@@ -79,8 +80,8 @@ ingame:
     unknown-player: "#ff5d73Target not found #03fc88{player}#a7b8b0."
     confirm-open: "#a7b8b0Confirm reward reset in GUI."
     cancelled: "#a7b8b0Cancelled reward reset."
-    success: "#3ecf8eReset #03fc88{type} #a7b8b0rewards for #03fc88{target} #a7b8b0in #03fc88{gamemode}#a7b8b0. Rows: #03fc88{rows}#a7b8b0."
-    error: "#ff5d73Failed #a7b8b0to reset reward claims."
+    success: "{prefix}:emerald: #3ecf8eReset #03fc88{type} #a7b8b0rewards for #03fc88{target} #a7b8b0in #03fc88{gamemode}#a7b8b0."
+    error: "{prefix}:redstone: #ff5d73Failed #a7b8b0to reset reward claims."
 
   reset-leaderboards:
     usage: "#a7b8b0Use #03fc88/fodiscordbotadmin resetleaderboards <gamemode|all> [board|all]#a7b8b0."
@@ -93,13 +94,13 @@ ingame:
 
   editor:
     # Config editor opened successfully.
-    open: "#3ecf8eOpened #03fc88editor#a7b8b0."
+    open: "{prefix}:book: #3ecf8eOpened #03fc88editor#a7b8b0."
 
     # Config change saved successfully.
-    saved: "#3ecf8eSaved #03fc88config#a7b8b0."
+    saved: "{prefix}:emerald: #3ecf8eSaved #03fc88config#a7b8b0."
 
     # Error saving config change.
-    save-error: "#ff5d73Failed #a7b8b0to save config."
+    save-error: "{prefix}:redstone: #ff5d73Failed #a7b8b0to save config."
 
     # User cancelled config editor input.
     input-cancelled: "#a7b8b0Cancelled."
@@ -111,7 +112,7 @@ ingame:
     invalid-input: "#ff5d73Invalid #a7b8b0input format."
 
     # User confirmed a delete action.
-    deleted: "#3ecf8eDeleted #03fc88{target}#a7b8b0."
+    deleted: "{prefix}:lava_bucket: #3ecf8eDeleted #03fc88{target}#a7b8b0."
 
     # User entered invalid color format.
     invalid-color: "#ff5d73Invalid #a7b8b0use #03fc88#RRGGBB#a7b8b0."

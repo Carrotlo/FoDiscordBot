@@ -14,6 +14,7 @@ import me.foesio.core.dialog.DialogButton;
 import me.foesio.core.dialog.TextDialogRequest;
 import me.foesio.core.editor.EditorDialogInputs;
 import me.foesio.core.editor.EditorItemFactory;
+import me.foesio.core.dialog.DialogIcons;
 import me.foesio.core.gui.GuiButtonConfig;
 import me.foesio.core.gui.GuiTitles;
 import me.foesio.core.gui.GuiSlots;
@@ -38,6 +39,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -153,6 +155,14 @@ public final class ConfigEditorService implements Listener {
             case COMMAND_LIST -> handleCommandListClick(player, rawSlot, event.getClick(), holder.context());
             case CONFIRM_DELETE -> {
             }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getInventory().getHolder() instanceof EntryBrowserHolder
+                || event.getInventory().getHolder() instanceof EditorHolder) {
+            event.setCancelled(true);
         }
     }
 
@@ -884,33 +894,34 @@ public final class ConfigEditorService implements Listener {
 
     private void openMainMenu(Player player) {
         Inventory inventory = createInventory(player, EditorView.MAIN, "", "Editor", 27);
-        inventory.setItem(10, pageItem(Material.COMMAND_BLOCK, "Discord", "Bot token, guild, invite."));
-        inventory.setItem(11, pageItem(Material.NAME_TAG, "Rank Sync", "Minecraft permission to Discord role."));
-        inventory.setItem(12, pageItem(Material.NOTE_BLOCK, "Chat Bridge", "Channel, webhook, relay names."));
-        inventory.setItem(13, pageItem(Material.IRON_BARS, "Linking", "Codes, cooldowns, linked role."));
-        inventory.setItem(14, pageItem(Material.OAK_SIGN, "Leaderboards", "Boards and embed settings."));
-        inventory.setItem(15, pageItem(Material.NETHER_STAR, "Booster", "Booster role and reward commands."));
-        inventory.setItem(16, pageItem(Material.MAP, "Network", "Multi-server MySQL settings."));
-        addFooter(inventory, false);
+        inventory.setItem(10, pageItem(player, Material.COMMAND_BLOCK, "Discord", "Bot token, guild, invite."));
+        inventory.setItem(11, pageItem(player, Material.NAME_TAG, "Rank Sync", "Minecraft permission to Discord role."));
+        inventory.setItem(12, pageItem(player, Material.NOTE_BLOCK, "Chat Bridge", "Channel, webhook, relay names."));
+        inventory.setItem(13, pageItem(player, Material.IRON_BARS, "Linking", "Codes, cooldowns, linked role."));
+        inventory.setItem(14, pageItem(player, Material.OAK_SIGN, "Leaderboards", "Boards and embed settings."));
+        inventory.setItem(15, pageItem(player, Material.NETHER_STAR, "Booster", "Booster role and reward commands."));
+        inventory.setItem(16, pageItem(player, Material.MAP, "Network", "Multi-server MySQL settings."));
+        addFooter(player, inventory, false);
         player.openInventory(inventory);
     }
 
     private void openDiscordPage(Player player) {
         Inventory inventory = createInventory(player, EditorView.DISCORD, "", "Discord", 36);
-        inventory.setItem(10, valueItem(Material.REDSTONE, "Bot Token", masked(plugin.getConfig().getString("discord.token", "")),
+        inventory.setItem(10, valueItem(player, Material.REDSTONE, "Bot Token", masked(plugin.getConfig().getString("discord.token", "")),
                 "Click to type token or clear."));
-        inventory.setItem(11, valueItem(Material.COMPASS, "Command Guild ID",
+        inventory.setItem(11, valueItem(player, Material.COMPASS, "Command Guild ID",
                 blankAsNone(plugin.getConfig().getString("discord.command-guild-id", "")), "Click to type guild ID."));
-        inventory.setItem(12, valueItem(Material.OAK_SIGN, "Invite URL",
+        inventory.setItem(12, valueItem(player, Material.OAK_SIGN, "Invite URL",
                 plugin.getConfig().getString("discord.invite-url", ""), "Click to type invite URL."));
-        inventory.setItem(13, EditorItemFactory.toggle("Discord /ip Command", plugin.getConfig().getBoolean("server-ip.enabled", false)));
-        inventory.setItem(14, valueItem(Material.ENDER_PEARL, "Server IP",
+        inventory.setItem(13, EditorItemFactory.toggle(player, "Discord /ip Command", plugin.getConfig().getBoolean("server-ip.enabled", false)));
+        inventory.setItem(14, valueItem(player, Material.ENDER_PEARL, "Server IP",
                 plugin.getConfig().getString("server-ip.ip", ""), "Click to type server address."));
-        inventory.setItem(15, valueItem(Material.BOOK, "Footer", blankAsNone(plugin.getConfig().getString("profile.footer", "")), "Click to type footer."));
-        inventory.setItem(16, valueItem(Material.FIREWORK_STAR, "Embed Color", displayHex(plugin.getConfig().getString("profile.embed-color", FoStyle.THEME)), "Click to type hex color."));
-        inventory.setItem(19, listPageItem(Material.WRITABLE_BOOK, "Profile Fields", "profile.fields"));
+        inventory.setItem(15, valueItem(player, Material.BOOK, "Footer", blankAsNone(plugin.getConfig().getString("profile.footer", "")), "Click to type footer."));
+        inventory.setItem(16, valueItem(player, Material.FIREWORK_STAR, "Embed Color", displayHex(plugin.getConfig().getString("profile.embed-color", FoStyle.THEME)), "Click to type hex color."));
+        inventory.setItem(19, listPageItem(player, Material.WRITABLE_BOOK, "Profile Fields", "profile.fields"));
         plugin.getAddons().forEach(addon -> addon.populateEditor("DISCORD", inventory));
-        addFooter(inventory, true);
+        addFooter(player, inventory, true);
+        renderForViewer(player, inventory);
         player.openInventory(inventory);
     }
 
@@ -921,7 +932,9 @@ public final class ConfigEditorService implements Listener {
     }
 
     public ItemStack createAddonToggleItem(String label, boolean enabled, List<String> addonLore) {
-        ItemStack item = EditorItemFactory.toggle(label, enabled);
+        ItemStack item = EditorItemFactory.templateButton(enabled ? Material.LIME_DYE : Material.RED_DYE,
+                enabled ? FoStyle.GOOD : FoStyle.BAD, label,
+                List.of("State: " + (enabled ? FoStyle.GOOD + "ON" : FoStyle.BAD + "OFF")), "toggle");
         ItemMeta meta = item.getItemMeta();
         if (meta == null) {
             return item;
@@ -935,65 +948,74 @@ public final class ConfigEditorService implements Listener {
         return item;
     }
 
+    private void renderForViewer(Player player, Inventory inventory) {
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (item != null) {
+                inventory.setItem(slot, DialogIcons.forViewer(player, item));
+            }
+        }
+    }
+
     private void openChatBridgePage(Player player) {
         Inventory inventory = createInventory(player, EditorView.CHAT_BRIDGE, "", "Chat Bridge", 27);
-        inventory.setItem(10, valueItem(Material.NOTE_BLOCK, "Channel ID",
+        inventory.setItem(10, valueItem(player, Material.NOTE_BLOCK, "Channel ID",
                 blankAsNone(plugin.getConfig().getString("chat-bridge.channel-id", "")), "Click to type channel ID."));
-        inventory.setItem(11, valueItem(Material.WRITABLE_BOOK, "Webhook Name",
+        inventory.setItem(11, valueItem(player, Material.WRITABLE_BOOK, "Webhook Name",
                 plugin.getConfig().getString("chat-bridge.webhook-name", ""), "Click to type webhook name."));
-        inventory.setItem(12, valueItem(Material.NAME_TAG, "Relay Name Format",
+        inventory.setItem(12, valueItem(player, Material.NAME_TAG, "Relay Name Format",
                 plugin.getConfig().getString("chat-bridge.relay-name-format", ""), "Click to type relay name format."));
-        inventory.setItem(13, valueItem(Material.PLAYER_HEAD, "Avatar URL Template",
+        inventory.setItem(13, valueItem(player, Material.PLAYER_HEAD, "Avatar URL Template",
                 plugin.getConfig().getString("chat-bridge.avatar-url-template", ""), "Click to type avatar URL template."));
-        addFooter(inventory, true);
+        addFooter(player, inventory, true);
         player.openInventory(inventory);
     }
 
     private void openLinkingPage(Player player) {
         Inventory inventory = createInventory(player, EditorView.LINKING, "", "Linking", 36);
-        inventory.setItem(10, valueItem(Material.NAME_TAG, "Code Length", plugin.getConfig().getInt("linking.code-length"), "Click to type exact value."));
-        inventory.setItem(11, valueItem(Material.CLOCK, "Code Expiry", plugin.getConfig().getInt("linking.code-expiry-seconds") + "s", "Click to type seconds."));
-        inventory.setItem(12, valueItem(Material.REPEATER, "In-Game Cooldown", plugin.getConfig().getInt("linking.ingame-command-cooldown-seconds") + "s", "Click to type seconds."));
-        inventory.setItem(13, valueItem(Material.COMPARATOR, "Discord Cooldown", plugin.getConfig().getInt("linking.discord-command-cooldown-seconds") + "s", "Click to type seconds."));
-        inventory.setItem(14, valueItem(Material.HOPPER, "Cleanup Interval", plugin.getConfig().getInt("linking.cleanup-interval-minutes") + "m", "Click to type minutes."));
-        inventory.setItem(15, EditorItemFactory.toggle("Remove Link Message", plugin.getConfig().getBoolean("linking.remove-link-message-after-success", false)));
-        inventory.setItem(16, valueItem(Material.PAPER, "Linked Role ID",
+        inventory.setItem(10, valueItem(player, Material.NAME_TAG, "Code Length", plugin.getConfig().getInt("linking.code-length"), "Click to type exact value."));
+        inventory.setItem(11, valueItem(player, Material.CLOCK, "Code Expiry", plugin.getConfig().getInt("linking.code-expiry-seconds") + "s", "Click to type seconds."));
+        inventory.setItem(12, valueItem(player, Material.REPEATER, "In-Game Cooldown", plugin.getConfig().getInt("linking.ingame-command-cooldown-seconds") + "s", "Click to type seconds."));
+        inventory.setItem(13, valueItem(player, Material.COMPARATOR, "Discord Cooldown", plugin.getConfig().getInt("linking.discord-command-cooldown-seconds") + "s", "Click to type seconds."));
+        inventory.setItem(14, valueItem(player, Material.HOPPER, "Cleanup Interval", plugin.getConfig().getInt("linking.cleanup-interval-minutes") + "m", "Click to type minutes."));
+        inventory.setItem(15, EditorItemFactory.toggle(player, "Remove Link Message", plugin.getConfig().getBoolean("linking.remove-link-message-after-success", false)));
+        inventory.setItem(16, valueItem(player, Material.PAPER, "Linked Role ID",
                 blankAsNone(plugin.getConfig().getString("linking.linked-role-id", "")), "Click to type role ID, none, or clear."));
-        inventory.setItem(19, listPageItem(Material.DIAMOND, "Always Link Commands", "linking.always-reward-commands"));
-        inventory.setItem(20, listPageItem(Material.EMERALD, "First-Time Link Commands", "linking.one-time-reward-commands"));
-        inventory.setItem(21, listPageItem(Material.REDSTONE, "Unlink Commands", "linking.unlink-commands"));
-        addFooter(inventory, true);
+        inventory.setItem(19, listPageItem(player, Material.DIAMOND, "Always Link Commands", "linking.always-reward-commands"));
+        inventory.setItem(20, listPageItem(player, Material.EMERALD, "First-Time Link Commands", "linking.one-time-reward-commands"));
+        inventory.setItem(21, listPageItem(player, Material.REDSTONE, "Unlink Commands", "linking.unlink-commands"));
+        addFooter(player, inventory, true);
         player.openInventory(inventory);
     }
 
     private void openBoosterPage(Player player) {
         Inventory inventory = createInventory(player, EditorView.BOOSTER, "", "Booster", 27);
-        inventory.setItem(10, EditorItemFactory.toggle("Booster Rewards", plugin.getConfig().getBoolean("booster.enabled", false)));
-        inventory.setItem(11, valueItem(Material.NETHER_STAR, "Booster Role ID",
+        inventory.setItem(10, EditorItemFactory.toggle(player, "Booster Rewards", plugin.getConfig().getBoolean("booster.enabled", false)));
+        inventory.setItem(11, valueItem(player, Material.NETHER_STAR, "Booster Role ID",
                 blankAsNone(plugin.getConfig().getString("booster.role-id", "")), "Click to type role ID."));
-        inventory.setItem(12, listPageItem(Material.DIAMOND, "Always Reward Commands", "booster.always-reward-commands"));
-        inventory.setItem(13, listPageItem(Material.EMERALD, "One-Time Reward Commands", "booster.one-time-reward-commands"));
-        inventory.setItem(14, listPageItem(Material.REDSTONE, "Removal Commands", "booster.removal-commands"));
-        addFooter(inventory, true);
+        inventory.setItem(12, listPageItem(player, Material.DIAMOND, "Always Reward Commands", "booster.always-reward-commands"));
+        inventory.setItem(13, listPageItem(player, Material.EMERALD, "One-Time Reward Commands", "booster.one-time-reward-commands"));
+        inventory.setItem(14, listPageItem(player, Material.REDSTONE, "Removal Commands", "booster.removal-commands"));
+        addFooter(player, inventory, true);
         player.openInventory(inventory);
     }
 
     private void openNetworkPage(Player player) {
         Inventory inventory = createInventory(player, EditorView.NETWORK, "", "Network", 36);
-        inventory.setItem(10, EditorItemFactory.toggle("Network Mode", plugin.getConfig().getBoolean("network.enabled", false)));
-        inventory.setItem(11, valueItem(Material.MAP, "Gamemode ID", plugin.getConfig().getString("network.gamemode-id", ""), "Click to type gamemode ID."));
-        inventory.setItem(12, EditorItemFactory.toggle("Primary Discord Node", plugin.getConfig().getBoolean("network.primary-discord-node", true)));
-        inventory.setItem(13, valueItem(Material.CLOCK, "Sync Interval", plugin.getConfig().getInt("network.sync.interval-seconds") + "s", "Click to type seconds."));
-        inventory.setItem(14, valueItem(Material.PAPER, "Profile Cache", plugin.getConfig().getInt("network.sync.profile-cache-seconds", 300) + "s", "Click to type seconds. 0 disables cache."));
-        inventory.setItem(15, EditorItemFactory.toggle("MySQL SSL", plugin.getConfig().getBoolean("network.mysql.use-ssl", false)));
-        inventory.setItem(16, valueItem(Material.COMPARATOR, "MySQL Timeout", plugin.getConfig().getInt("network.mysql.connection-timeout-seconds", 30) + "s", "Click to type seconds."));
-        inventory.setItem(19, valueItem(Material.COMPASS, "MySQL Host", plugin.getConfig().getString("network.mysql.host", ""), "Click to type host."));
-        inventory.setItem(20, valueItem(Material.REPEATER, "MySQL Port", plugin.getConfig().getInt("network.mysql.port"), "Click to type port."));
-        inventory.setItem(21, valueItem(Material.BOOK, "MySQL Database", plugin.getConfig().getString("network.mysql.database", ""), "Click to type database."));
-        inventory.setItem(22, valueItem(Material.PLAYER_HEAD, "MySQL Username", plugin.getConfig().getString("network.mysql.username", ""), "Click to type username."));
-        inventory.setItem(23, valueItem(Material.TRIPWIRE_HOOK, "MySQL Password", masked(plugin.getConfig().getString("network.mysql.password", "")), "Click to type password or clear."));
-        inventory.setItem(24, valueItem(Material.HOPPER, "MySQL Pool Size", plugin.getConfig().getInt("network.mysql.pool-size", 8), "Click to type max connections."));
-        addFooter(inventory, true);
+        inventory.setItem(10, EditorItemFactory.toggle(player, "Network Mode", plugin.getConfig().getBoolean("network.enabled", false)));
+        inventory.setItem(11, valueItem(player, Material.MAP, "Gamemode ID", plugin.getConfig().getString("network.gamemode-id", ""), "Click to type gamemode ID."));
+        inventory.setItem(12, EditorItemFactory.toggle(player, "Primary Discord Node", plugin.getConfig().getBoolean("network.primary-discord-node", true)));
+        inventory.setItem(13, valueItem(player, Material.CLOCK, "Sync Interval", plugin.getConfig().getInt("network.sync.interval-seconds") + "s", "Click to type seconds."));
+        inventory.setItem(14, valueItem(player, Material.PAPER, "Profile Cache", plugin.getConfig().getInt("network.sync.profile-cache-seconds", 300) + "s", "Click to type seconds. 0 disables cache."));
+        inventory.setItem(15, EditorItemFactory.toggle(player, "MySQL SSL", plugin.getConfig().getBoolean("network.mysql.use-ssl", false)));
+        inventory.setItem(16, valueItem(player, Material.COMPARATOR, "MySQL Timeout", plugin.getConfig().getInt("network.mysql.connection-timeout-seconds", 30) + "s", "Click to type seconds."));
+        inventory.setItem(19, valueItem(player, Material.COMPASS, "MySQL Host", plugin.getConfig().getString("network.mysql.host", ""), "Click to type host."));
+        inventory.setItem(20, valueItem(player, Material.REPEATER, "MySQL Port", plugin.getConfig().getInt("network.mysql.port"), "Click to type port."));
+        inventory.setItem(21, valueItem(player, Material.BOOK, "MySQL Database", plugin.getConfig().getString("network.mysql.database", ""), "Click to type database."));
+        inventory.setItem(22, valueItem(player, Material.PLAYER_HEAD, "MySQL Username", plugin.getConfig().getString("network.mysql.username", ""), "Click to type username."));
+        inventory.setItem(23, valueItem(player, Material.TRIPWIRE_HOOK, "MySQL Password", masked(plugin.getConfig().getString("network.mysql.password", "")), "Click to type password or clear."));
+        inventory.setItem(24, valueItem(player, Material.HOPPER, "MySQL Pool Size", plugin.getConfig().getInt("network.mysql.pool-size", 8), "Click to type max connections."));
+        addFooter(player, inventory, true);
         player.openInventory(inventory);
     }
 
@@ -1014,16 +1036,16 @@ public final class ConfigEditorService implements Listener {
                 continue;
             }
             String path = "rank-sync.ranks." + key;
-            entries.add(EntryBrowserRequest.Entry.of(key, EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Rank " + key, List.of(
+            entries.add(EntryBrowserRequest.Entry.of(key, EditorItemFactory.button(player, Material.PAPER, FoStyle.THEME, "Rank " + key, List.of(
                     FoStyle.WHITE + "Permission: " + value(plugin.getConfig().getString(path + ".permission", "")),
                     FoStyle.WHITE + "Role ID: " + value(blankAsNone(plugin.getConfig().getString(path + ".role-id", ""))),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            ))));
+            ), "edit the rank")));
         }
         openEntryBrowser(player, new DiscordBrowserContext(EditorView.RANK_SYNC, "", EditorView.MAIN, ""), normalized, requestedPage, entries,
-                "Rank Sync", EditorItemFactory.toggle("Rank Sync", plugin.getConfig().getBoolean("rank-sync.enabled", false)),
-                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Rank", List.of(FoStyle.WHITE + "Click to type a new rank mapping.")));
+                "Rank Sync", EditorItemFactory.toggle(player, "Rank Sync", plugin.getConfig().getBoolean("rank-sync.enabled", false)),
+                EditorItemFactory.button(player, Material.ANVIL, FoStyle.GOOD, "Add Rank", List.of(FoStyle.WHITE + "Click to type a new rank mapping."), "add a rank"));
     }
 
     private void openProfileFieldsPage(Player player) {
@@ -1045,18 +1067,18 @@ public final class ConfigEditorService implements Listener {
             if (!matchesFilter(name, normalized)) {
                 continue;
             }
-            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.item(Material.PAPER, FoStyle.THEME + "Field #" + (index + 1), List.of(
+            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.button(player, Material.PAPER, FoStyle.THEME, "Field #" + (index + 1), List.of(
                     FoStyle.WHITE + "Name: " + value(name),
                     FoStyle.WHITE + "Value: " + value(trim(String.valueOf(mapValue(field, "value", "N/A")))),
                     FoStyle.WHITE + "Inline: " + (Boolean.parseBoolean(String.valueOf(mapValue(field, "inline", false))) ? FoStyle.GOOD + "Enabled" : FoStyle.BAD + "Disabled"),
                     FoStyle.WHITE + "Same line: " + (Boolean.parseBoolean(String.valueOf(mapValue(field, "same-line", false))) ? FoStyle.GOOD + "Enabled" : FoStyle.BAD + "Disabled"),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            ))));
+            ), "edit the field")));
         }
         openEntryBrowser(player, new DiscordBrowserContext(EditorView.PROFILE_FIELDS, "", EditorView.DISCORD, ""), normalized, requestedPage, entries,
                 "Profile Fields", null,
-                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Field", List.of(FoStyle.WHITE + "Click to type a new field.")));
+                EditorItemFactory.button(player, Material.ANVIL, FoStyle.GOOD, "Add Field", List.of(FoStyle.WHITE + "Click to type a new field."), "add a field"));
     }
 
     private void openLeaderboardsPage(Player player) {
@@ -1076,17 +1098,17 @@ public final class ConfigEditorService implements Listener {
                 continue;
             }
             String basePath = "leaderboards.boards." + alias;
-            entries.add(EntryBrowserRequest.Entry.of(alias, EditorItemFactory.item(Material.OAK_SIGN, FoStyle.THEME + "Board " + alias, List.of(
+            entries.add(EntryBrowserRequest.Entry.of(alias, EditorItemFactory.button(player, Material.OAK_SIGN, FoStyle.THEME, "Board " + alias, List.of(
                     FoStyle.WHITE + "Title: " + value(trim(plugin.getConfig().getString(basePath + ".title", alias))),
                     FoStyle.WHITE + "Lines: " + value(plugin.getConfig().getStringList(basePath + ".lines").size()),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            ))));
+            ), "edit the board")));
         }
         openEntryBrowser(player, new DiscordBrowserContext(EditorView.LEADERBOARDS, "", EditorView.MAIN, ""), normalized, requestedPage, entries,
-                "Leaderboards", valueItem(Material.GLOW_INK_SAC, "Embed Color",
+                "Leaderboards", valueItem(player, Material.GLOW_INK_SAC, "Embed Color",
                         displayHex(plugin.getConfig().getString("leaderboards.embed-color", FoStyle.THEME)), "Click to type hex color."),
-                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add Board", List.of(FoStyle.WHITE + "Click to type a new board.")));
+                EditorItemFactory.button(player, Material.ANVIL, FoStyle.GOOD, "Add Board", List.of(FoStyle.WHITE + "Click to type a new board."), "add a board"));
     }
 
     private void openBoardPage(Player player, String alias) {
@@ -1097,15 +1119,15 @@ public final class ConfigEditorService implements Listener {
 
         String basePath = "leaderboards.boards." + alias;
         Inventory inventory = createInventory(player, EditorView.BOARD, alias, "Board " + alias, 27);
-        inventory.setItem(10, valueItem(Material.OAK_SIGN, "Title", plugin.getConfig().getString(basePath + ".title", alias), "Click to type title."));
-        inventory.setItem(11, valueItem(Material.PAPER, "Footer", blankAsNone(plugin.getConfig().getString(basePath + ".footer", "none")), "Click to type footer or none."));
-        inventory.setItem(12, valueItem(Material.BOOK, "Empty Text", plugin.getConfig().getString(basePath + ".empty-text", ""), "Click to type empty text."));
-        inventory.setItem(13, listPageItem(Material.WRITABLE_BOOK, "Lines", basePath + ".lines"));
-        inventory.setItem(16, EditorItemFactory.item(Material.LAVA_BUCKET, FoStyle.BAD + "Delete Board", List.of(
+        inventory.setItem(10, valueItem(player, Material.OAK_SIGN, "Title", plugin.getConfig().getString(basePath + ".title", alias), "Click to type title."));
+        inventory.setItem(11, valueItem(player, Material.PAPER, "Footer", blankAsNone(plugin.getConfig().getString(basePath + ".footer", "none")), "Click to type footer or none."));
+        inventory.setItem(12, valueItem(player, Material.BOOK, "Empty Text", plugin.getConfig().getString(basePath + ".empty-text", ""), "Click to type empty text."));
+        inventory.setItem(13, listPageItem(player, Material.WRITABLE_BOOK, "Lines", basePath + ".lines"));
+        inventory.setItem(16, EditorItemFactory.button(player, Material.LAVA_BUCKET, FoStyle.BAD, "Delete Board", List.of(
                 FoStyle.WHITE + "Opens confirmation.",
                 FoStyle.WHITE + "Board: " + value(alias)
-        )));
-        addFooter(inventory, true);
+        ), "delete the board"));
+        addFooter(player, inventory, true);
         player.openInventory(inventory);
     }
 
@@ -1127,15 +1149,15 @@ public final class ConfigEditorService implements Listener {
             if (!matchesFilter(values.get(index), normalized)) {
                 continue;
             }
-            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.item(Material.PAPER, FoStyle.THEME + commandListEntryName(path) + " #" + (index + 1), List.of(
+            entries.add(EntryBrowserRequest.Entry.of(String.valueOf(index), EditorItemFactory.button(player, Material.PAPER, FoStyle.THEME, commandListEntryName(path) + " #" + (index + 1), List.of(
                     FoStyle.WHITE + trim(values.get(index)),
                     FoStyle.WHITE + "Click: " + value("edit"),
                     FoStyle.WHITE + "Right click: " + FoStyle.BAD + "delete"
-            ))));
+            ), "edit the command")));
         }
         openEntryBrowser(player, new DiscordBrowserContext(EditorView.COMMAND_LIST, path, returnView, returnContext), normalized, requestedPage, entries,
                 commandListTitle(path), null,
-                EditorItemFactory.item(Material.ANVIL, FoStyle.THEME + "Add " + commandListEntryName(path), List.of(FoStyle.WHITE + "Click to type a new line.")));
+                EditorItemFactory.button(player, Material.ANVIL, FoStyle.GOOD, "Add " + commandListEntryName(path), List.of(FoStyle.WHITE + "Click to type a new line."), "add a line"));
     }
 
     private void openEntryBrowser(Player player, DiscordBrowserContext context, String filter, int page,
@@ -1332,8 +1354,8 @@ public final class ConfigEditorService implements Listener {
     private void openConfirmDelete(Player player, DeleteRequest request) {
         pendingDeletes.put(player.getUniqueId(), request);
         Inventory inventory = createInventory(player, EditorView.CONFIRM_DELETE, "", "Confirm Delete", 27);
-        inventory.setItem(11, EditorItemFactory.cancel());
-        inventory.setItem(15, EditorItemFactory.confirm());
+        inventory.setItem(11, EditorItemFactory.cancel(player));
+        inventory.setItem(15, EditorItemFactory.confirm(player));
         player.openInventory(inventory);
         plugin.getEditorSounds().open(player);
     }
@@ -1391,9 +1413,9 @@ public final class ConfigEditorService implements Listener {
         return Math.max(0, Math.min(requestedPage, maxPage));
     }
 
-    private void addFooter(Inventory inventory, boolean back) {
+    private void addFooter(Player player, Inventory inventory, boolean back) {
         if (back) {
-            inventory.setItem(backSlot(inventory), EditorItemFactory.back());
+            inventory.setItem(backSlot(inventory), me.foesio.core.gui.GuiButtons.back(player));
         }
     }
 
@@ -1424,25 +1446,26 @@ public final class ConfigEditorService implements Listener {
         return true;
     }
 
-    private ItemStack pageItem(Material material, String name, String description) {
-        return EditorItemFactory.item(material, FoStyle.THEME + name, List.of(FoStyle.WHITE + description, FoStyle.WHITE + "Click to open."));
+    private ItemStack pageItem(Player player, Material material, String name, String description) {
+        return EditorItemFactory.button(player, material, FoStyle.THEME, name,
+                List.of(FoStyle.WHITE + description), "open " + name.toLowerCase(Locale.ROOT));
     }
 
-    private ItemStack valueItem(Material material, String name, Object current, String action) {
-        return EditorItemFactory.item(material, FoStyle.THEME + name, List.of(
+    private ItemStack valueItem(Player player, Material material, String name, Object current, String action) {
+        return EditorItemFactory.button(player, material, FoStyle.THEME, name, List.of(
                 FoStyle.WHITE + "Current: " + value(trim(String.valueOf(current))),
                 FoStyle.WHITE + action
-        ));
+        ), action);
     }
 
-    private ItemStack listPageItem(Material material, String name, String path) {
+    private ItemStack listPageItem(Player player, Material material, String name, String path) {
         int count = plugin.getConfig().isList(path)
                 ? plugin.getConfig().getList(path, List.of()).size()
                 : plugin.getConfig().getKeys(true).stream().filter(key -> key.startsWith(path + ".")).toList().size();
-        return EditorItemFactory.item(material, FoStyle.THEME + name, List.of(
+        return EditorItemFactory.button(player, material, FoStyle.THEME, name, List.of(
                 FoStyle.WHITE + "Entries: " + value(count),
                 FoStyle.WHITE + "Click to edit."
-        ));
+        ), "edit " + name.toLowerCase(Locale.ROOT));
     }
 
     private void fillBackground(Inventory inventory) {

@@ -24,6 +24,7 @@ public final class SkinAvatarService {
 
     private static final String DEFAULT_AVATAR_TEMPLATE = "https://visage.surgeplay.com/bust/160/{player_uuid}";
     private static final String OFFLINE_NAME_AVATAR_TEMPLATE = "https://visage.surgeplay.com/bust/160/{player_name}";
+    private static final String TEXTURE_BUST_AVATAR_TEMPLATE = "https://nmsr.nickac.dev/bust/{skin_texture_hash}";
     private static final Pattern SKIN_TEXTURE_URL_PATTERN = Pattern.compile(
             "\"SKIN\"\\s*:\\s*\\{.*?\"url\"\\s*:\\s*\"([^\"]+)\"",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL
@@ -312,7 +313,7 @@ public final class SkinAvatarService {
                 return fillTemplate(template, playerUuid, playerName, texture);
             }
             if (!Bukkit.getOnlineMode()) {
-                return texture.url();
+                return fillTemplate(TEXTURE_BUST_AVATAR_TEMPLATE, playerUuid, playerName, texture);
             }
         }
 

@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>me.foesio</groupId>
     <artifactId>FoDiscordBot</artifactId>
-    <version>4.8</version>
+    <version>5.0</version>
     <packaging>jar</packaging>
     <name>FoDiscordBot</name>
     <properties>

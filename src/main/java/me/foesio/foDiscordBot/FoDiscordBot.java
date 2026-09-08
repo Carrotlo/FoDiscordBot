@@ -74,8 +74,6 @@ public final class FoDiscordBot extends JavaPlugin {
             "reload.success",
             "reload.error",
             "reload.usage",
-            "version.author",
-            "version.current",
             "reset-rewards.usage",
             "reset-rewards.players-only-all",
             "reset-rewards.unknown-player",
@@ -139,6 +137,7 @@ public final class FoDiscordBot extends JavaPlugin {
             this.editorSounds = FoEditorSounds.create(sounds);
             this.guiSounds = FoGuiSounds.create(sounds);
             this.updateNoticeService = core.createUpdateNotices(messages, "fodiscordbot", adminSounds);
+            migrateSprites();
             reloadConfiguration();
 
             this.linkRepository = new LinkRepository(this);
@@ -494,6 +493,35 @@ public final class FoDiscordBot extends JavaPlugin {
                 .replaceExact("ingame.reset-rewards.usage", "#a7b8b0Use #03fc88/fodiscord resetrewards <linked|booster> <player|all> [gamemode]#a7b8b0.",
                         "#a7b8b0Use #03fc88/fodiscordbotadmin resetrewards <linked|booster> <player|discord|all> [gamemode]#a7b8b0.")
                 .build();
+    }
+
+    private void migrateSprites() {
+        messages.migrateToVersion(core.migrations(), 1, config -> {
+            boolean changed = false;
+            changed |= FoMessageService.addMissingToken(config, "ingame.link.generated", ":paper:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.link.error", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.unlink.success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.rewards.success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.booster.success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.booster.removed", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.reload.success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.reload.error", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.reset-rewards.success", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.reset-rewards.error", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.editor.open", ":book:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.editor.saved", ":emerald:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.editor.save-error", ":redstone:");
+            changed |= FoMessageService.addMissingToken(config, "ingame.editor.deleted", ":lava_bucket:");
+            return true;
+        });
+        messages.migrateToVersion(core.migrations(), 2, config -> {
+            String oldPrefix = FoStyle.defaultPrefix("FoDiscordBot");
+            if (!oldPrefix.equals(config.getString("tokens.prefix"))) {
+                return true;
+            }
+            config.set("tokens.prefix", ":comparator: " + oldPrefix);
+            return true;
+        });
     }
 
     private boolean migrateLegacyPrefix(FileConfiguration config) {
