@@ -12,6 +12,8 @@ import me.foesio.core.editor.EditorItemFactory;
 import me.foesio.core.gui.GuiTitles;
 import me.foesio.core.message.FoMessageService;
 import me.foesio.foDiscordBot.FoDiscordBot;
+import me.foesio.foDiscordBot.api.RewardReset;
+import me.foesio.foDiscordBot.service.RewardResetNotifier;
 import me.foesio.foDiscordBot.model.LinkedAccount;
 import me.foesio.foDiscordBot.service.LinkRepository;
 import me.foesio.foDiscordBot.util.BukkitFutures;
@@ -303,14 +305,14 @@ public final class FoDiscordCommand implements Listener {
                     case LINKED -> repository.resetAllGamemodeRewardClaims(request.gamemodeId());
                     case BOOSTER -> repository.resetAllBoosterRewardClaims(request.gamemodeId());
                 };
-                return new ResetResult(ResetStatus.SUCCESS, changedRows, request.targetName());
+                return completedReset(request, changedRows, request.targetName(), RewardReset.Scope.ALL, null, null);
             }
 
             if (request.kind() == RewardKind.LINKED) {
                 String discordUserId = parseDiscordId(request.targetInput());
                 if (discordUserId != null) {
                     int changedRows = repository.resetGamemodeRewardClaimsByDiscordId(discordUserId, request.gamemodeId());
-                    return new ResetResult(ResetStatus.SUCCESS, changedRows, discordUserId);
+                    return completedReset(request, changedRows, discordUserId, RewardReset.Scope.DISCORD, null, discordUserId);
                 }
             }
 
@@ -323,10 +325,21 @@ public final class FoDiscordCommand implements Listener {
                 case LINKED -> repository.resetGamemodeRewardClaims(target.playerUuid(), request.gamemodeId());
                 case BOOSTER -> repository.resetBoosterRewardClaims(target.playerUuid(), request.gamemodeId());
             };
-            return new ResetResult(ResetStatus.SUCCESS, changedRows, target.playerName());
+            return completedReset(request, changedRows, target.playerName(), RewardReset.Scope.PLAYER, target.playerUuid(), null);
         } catch (Exception exception) {
             throw new RuntimeException(exception);
         }
+    }
+
+    private ResetResult completedReset(ResetRequest request, int changedRows, String targetName,
+                                       RewardReset.Scope scope, UUID playerUuid, String discordId) {
+        RewardReset reset = new RewardReset(UUID.randomUUID(),
+                request.kind() == RewardKind.LINKED ? RewardReset.Kind.LINKED : RewardReset.Kind.BOOSTER,
+                request.gamemodeId(), scope, playerUuid, discordId, changedRows);
+        RewardResetNotifier.notifyAddons(plugin.getAddons(), reset, failure ->
+                plugin.logWarning("An addon reward-reset callback failed (" + failure.getClass().getSimpleName()
+                        + "); the host reset completed. Operation: " + reset.operationId()));
+        return new ResetResult(ResetStatus.SUCCESS, changedRows, targetName);
     }
 
     private ResolvedTarget resolveTarget(LinkRepository repository, ResetRequest request) throws Exception {
