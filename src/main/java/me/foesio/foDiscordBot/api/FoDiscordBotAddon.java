@@ -30,6 +30,20 @@ public interface FoDiscordBotAddon {
     default void onConfigReload() {
     }
 
+    /**
+     * Called on the reset command's worker after the host repository reset succeeds,
+     * including successful resets that affect zero rows. Only addons on the executing
+     * server receive this notification. No Bukkit main-thread access is allowed here.
+     * Keep callbacks short and enqueue longer work on an addon-owned bounded executor.
+     *
+     * <p>Delivery is best-effort, not durable or transactional with addon storage.
+     * A crash after commit can lose the notification. Direct repository calls and
+     * leaderboard resets do not emit it. Repeated commands are separate operations;
+     * consumers must not interpret every notification as a new network season.</p>
+     */
+    default void onRewardsReset(RewardReset reset) {
+    }
+
     default void contributeCommands(List<CommandData> commands) {
     }
 
