@@ -1,5 +1,7 @@
 package me.foesio.foDiscordBot.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -15,12 +17,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import me.foesio.core.command.CommandPlaceholders;
 import me.foesio.foDiscordBot.FoDiscordBot;
+import me.foesio.foDiscordBot.api.event.BoosterRewardResultEvent;
 import me.foesio.foDiscordBot.model.LinkedAccount;
 import me.foesio.foDiscordBot.util.BukkitFutures;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 public final class BoosterService {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final FoDiscordBot plugin;
     private final LinkRepository repository;
@@ -53,6 +58,24 @@ public final class BoosterService {
 
         BukkitFutures.supplyAsync(plugin, () -> loadJoinAction(player, gamemodeId, runtimeConfig))
                 .thenCompose(action -> applyJoinAction(action, gamemodeId))
+                .handle((result, failure) -> BukkitFutures.supplyAsync(plugin, () -> {
+                    BoosterRewardResultEvent.Result eventResult = failure != null
+                            ? BoosterRewardResultEvent.Result.FAILED
+                            : switch (result) {
+                                case GRANTED -> BoosterRewardResultEvent.Result.GRANTED;
+                                case REMOVED -> BoosterRewardResultEvent.Result.REMOVED;
+                                case FAILED -> BoosterRewardResultEvent.Result.FAILED;
+                                case SKIPPED -> null;
+                            };
+                    if (eventResult != null) {
+                        IntegrationEventDispatcher.firePostEvent(plugin, new BoosterRewardResultEvent(
+                                player.getUniqueId(), gamemodeId, eventResult));
+                    }
+                    if (failure != null) {
+                        throw new java.util.concurrent.CompletionException(failure);
+                    }
+                    return result;
+                })).thenCompose(future -> future)
                 .whenComplete((result, throwable) -> {
                     dispatchInProgress.remove(lockKey);
                     if (throwable != null) {
@@ -315,12 +338,19 @@ public final class BoosterService {
             return false;
         }
         if (response.statusCode() == 200) {
-            return response.body() != null && response.body().contains("\"" + roleId + "\"");
+            JsonNode roles = JSON.readTree(response.body()).path("roles");
+            if (!roles.isArray()) {
+                throw new IllegalStateException("Discord booster role response has no roles array.");
+            }
+            for (JsonNode role : roles) {
+                if (roleId.equals(role.asText())) {
+                    return true;
+                }
+            }
+            return false;
         }
 
-        warnOnce("booster-http-" + response.statusCode(),
-                "Discord booster role check failed with HTTP " + response.statusCode() + ".");
-        return false;
+        throw new IllegalStateException("Discord booster role check failed with HTTP " + response.statusCode() + ".");
     }
 
     private RewardDispatchSummary dispatchCommands(

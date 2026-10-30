@@ -23,6 +23,11 @@ import me.foesio.core.message.FoMessageService;
 import me.foesio.core.number.LargeNumberParser;
 import me.foesio.foDiscordBot.FoDiscordBot;
 import me.foesio.foDiscordBot.api.FoDiscordBotAddon;
+import me.foesio.foDiscordBot.api.CommandRefreshResult;
+import me.foesio.foDiscordBot.api.event.AccountChangeCause;
+import me.foesio.foDiscordBot.api.event.DiscordBotReadyEvent;
+import me.foesio.foDiscordBot.api.event.DiscordToMinecraftChatRelayEvent;
+import me.foesio.foDiscordBot.api.event.MinecraftToDiscordChatRelayEvent;
 import me.foesio.foDiscordBot.model.LeaderboardView;
 import me.foesio.foDiscordBot.model.ProfileCard;
 import me.foesio.foDiscordBot.model.ProfileField;
@@ -50,6 +55,7 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import org.bukkit.ChatColor;
+import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
 
 public final class DiscordBotManager extends ListenerAdapter {
@@ -67,7 +73,11 @@ public final class DiscordBotManager extends ListenerAdapter {
     private final AtomicBoolean relayQueueDrainRunning = new AtomicBoolean(false);
 
     private volatile JDA jda;
+    private volatile JDA connectingJda;
     private CoreRepeatingTask relayQueueTask;
+    private CompletableFuture<CommandRefreshResult> commandRefreshTail = CompletableFuture.completedFuture(CommandRefreshResult.UNAVAILABLE);
+    private volatile CompletableFuture<Void> startupFuture = CompletableFuture.completedFuture(null);
+    private volatile long lifecycleGeneration;
 
     public DiscordBotManager(
             FoDiscordBot plugin,
@@ -82,7 +92,9 @@ public final class DiscordBotManager extends ListenerAdapter {
     }
 
     public synchronized void startAsync() {
+        long generation = ++lifecycleGeneration;
         if (!plugin.getPluginConfig().shouldRunDiscordNode()) {
+            startupFuture = CompletableFuture.completedFuture(null);
             if (plugin.getPluginConfig().hasConfiguredBotToken() && plugin.getPluginConfig().networkEnabled()) {
                 plugin.logInfo("Network mode is enabled and this node is not primary-discord-node. Skipping Discord gateway startup.");
             } else {
@@ -92,12 +104,22 @@ public final class DiscordBotManager extends ListenerAdapter {
         }
         String token = plugin.getPluginConfig().botToken();
 
+        CompletableFuture<Void> currentStartup = new CompletableFuture<>();
+        startupFuture = currentStartup;
         BukkitFutures.supplyAsync(plugin, () -> {
-            startBlocking(token);
+            startBlocking(token, generation);
             return null;
-        }).exceptionally(throwable -> {
-            plugin.logSevere("Failed to start Discord bot: " + throwable.getMessage());
-            return null;
+        }).whenComplete((ignored, throwable) -> {
+            if (generation != lifecycleGeneration) {
+                currentStartup.complete(null);
+                return;
+            }
+            if (throwable != null) {
+                currentStartup.completeExceptionally(throwable);
+                plugin.logSevere("Failed to start Discord bot: " + throwable.getMessage());
+            } else {
+                currentStartup.complete(null);
+            }
         });
     }
 
@@ -110,19 +132,56 @@ public final class DiscordBotManager extends ListenerAdapter {
         return jda != null && plugin.getPluginConfig().shouldRunDiscordNode();
     }
 
+    /** Serializes command updates so an older add-on list cannot overwrite a newer one. */
+    public synchronized CompletableFuture<CommandRefreshResult> refreshSlashCommands() {
+        commandRefreshTail = commandRefreshTail.handle((ignored, failure) -> null).thenCompose(ignored -> {
+            CompletableFuture<Void> awaitedStartup = jda == null ? startupFuture : CompletableFuture.completedFuture(null);
+            return awaitedStartup.handle((ready, failure) -> null).thenCompose(ready -> {
+                JDA active = jda;
+                if (active == null || !plugin.getPluginConfig().shouldRunDiscordNode()) {
+                    return CompletableFuture.completedFuture(CommandRefreshResult.UNAVAILABLE);
+                }
+                return BukkitFutures.supplyAsync(plugin, () -> syncCommands(active))
+                        .thenCompose(future -> future)
+                        .handle((result, failure) -> {
+                            if (failure != null) {
+                                plugin.logWarning("Failed to refresh Discord slash commands: " + failure.getMessage());
+                                return CommandRefreshResult.FAILED;
+                            }
+                            return jda == active ? CommandRefreshResult.UPDATED : CommandRefreshResult.UNAVAILABLE;
+                        });
+            });
+        });
+        return commandRefreshTail;
+    }
+
     public synchronized void shutdown() {
+        lifecycleGeneration++;
+        stopCurrentBot();
+        startupFuture.complete(null);
+    }
+
+    private void stopCurrentBot() {
         JDA active = jda;
+        JDA connecting = connectingJda;
         jda = null;
+        connectingJda = null;
         relayWebhookUrls.clear();
         relayWarnings.clear();
         if (relayQueueTask != null) {
             relayQueueTask.cancel();
             relayQueueTask = null;
         }
+        stopJda(active);
+        if (connecting != active) {
+            stopJda(connecting);
+        }
+    }
+
+    private void stopJda(JDA active) {
         if (active == null) {
             return;
         }
-
         active.setAutoReconnect(false);
         active.shutdown();
 
@@ -206,7 +265,7 @@ public final class DiscordBotManager extends ListenerAdapter {
                 return;
             }
 
-            linkService.completeDiscordLink(code, event.getAuthor()).whenComplete((response, throwable) -> {
+            linkService.completeDiscordLink(code, event.getAuthor(), AccountChangeCause.DISCORD_MESSAGE).whenComplete((response, throwable) -> {
                 if (throwable != null) {
                     replyToRawLinkMessage(event, plugin.messages().renderConfigured("discord.generic-error"));
                     return;
@@ -420,8 +479,13 @@ public final class DiscordBotManager extends ListenerAdapter {
                 .toList();
     }
 
-    private void startBlocking(String token) {
-        shutdown();
+    private void startBlocking(String token, long generation) {
+        synchronized (this) {
+            if (generation != lifecycleGeneration) {
+                return;
+            }
+            stopCurrentBot();
+        }
 
         JDA built = JDABuilder.createLight(token, Collections.emptyList())
                 .enableIntents(EnumSet.of(
@@ -433,16 +497,55 @@ public final class DiscordBotManager extends ListenerAdapter {
                 .setAutoReconnect(true)
                 .build();
 
+        synchronized (this) {
+            if (generation != lifecycleGeneration) {
+                built.shutdownNow();
+                return;
+            }
+            connectingJda = built;
+        }
+
         try {
             built.awaitReady();
-            syncCommands(built);
-            jda = built;
-            startRelayQueueConsumer();
-            plugin.logInfo("Discord bot connected successfully.");
+            syncCommands(built).join();
+            synchronized (this) {
+                if (generation != lifecycleGeneration) {
+                    if (connectingJda == built) {
+                        connectingJda = null;
+                    }
+                    built.shutdownNow();
+                    return;
+                }
+                connectingJda = null;
+                jda = built;
+                startRelayQueueConsumer();
+            }
+            if (jda == built) {
+                IntegrationEventDispatcher.firePostEvent(plugin, new DiscordBotReadyEvent());
+                plugin.logInfo("Discord bot connected successfully.");
+            }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            synchronized (this) {
+                if (connectingJda == built) {
+                    connectingJda = null;
+                }
+            }
+            built.shutdownNow();
             throw new RuntimeException("Interrupted while starting Discord bot", exception);
         } catch (Exception exception) {
+            synchronized (this) {
+                if (connectingJda == built) {
+                    connectingJda = null;
+                }
+                if (jda == built) {
+                    jda = null;
+                    if (relayQueueTask != null) {
+                        relayQueueTask.cancel();
+                        relayQueueTask = null;
+                    }
+                }
+            }
             built.shutdown();
             try {
                 if (!built.awaitShutdown(5, TimeUnit.SECONDS)) {
@@ -456,7 +559,7 @@ public final class DiscordBotManager extends ListenerAdapter {
         }
     }
 
-    private void syncCommands(JDA readyJda) {
+    private CompletableFuture<Void> syncCommands(JDA readyJda) {
         List<CommandData> commands = new ArrayList<>();
         commands.add(Commands.slash("link", "Link your Discord account with a Minecraft account")
                 .addOption(OptionType.STRING, "code", "Your in-game link code", true));
@@ -478,13 +581,12 @@ public final class DiscordBotManager extends ListenerAdapter {
         if (guildId != null) {
             Guild guild = readyJda.getGuildById(guildId);
             if (guild != null) {
-                guild.updateCommands().addCommands(commands).queue();
-                return;
+                return guild.updateCommands().addCommands(commands).submit().thenApply(ignored -> null);
             }
             plugin.logWarning("Configured Discord guild " + guildId + " was not found. Falling back to global slash commands.");
         }
 
-        readyJda.updateCommands().addCommands(commands).queue();
+        return readyJda.updateCommands().addCommands(commands).submit().thenApply(ignored -> null);
     }
 
     private Duration checkInteractionCooldown(String userId) {
@@ -511,10 +613,22 @@ public final class DiscordBotManager extends ListenerAdapter {
     }
 
     public void relayMinecraftChat(UUID playerUuid, String playerName, String rawMessage) {
+        relayMinecraftChat(playerUuid, playerName, rawMessage, !Bukkit.isPrimaryThread());
+    }
+
+    public void relayMinecraftChat(UUID playerUuid, String playerName, String rawMessage, boolean asynchronous) {
         String channelId = plugin.getPluginConfig().normalizedChatBridgeChannelId();
         if (channelId == null) {
             return;
         }
+
+        MinecraftToDiscordChatRelayEvent relayEvent = new MinecraftToDiscordChatRelayEvent(
+                playerUuid, playerName, rawMessage, asynchronous);
+        Bukkit.getPluginManager().callEvent(relayEvent);
+        if (relayEvent.isCancelled() || relayEvent.message().isBlank()) {
+            return;
+        }
+        rawMessage = relayEvent.message();
 
         JDA active = jda;
         if (active == null) {
@@ -587,7 +701,17 @@ public final class DiscordBotManager extends ListenerAdapter {
                 event.getAuthor().getGlobalName(),
                 event.getAuthor().getName()
         ));
-        String formatted = formatIngameRelayMessage(authorName, relayedMessage);
+        DiscordToMinecraftChatRelayEvent relayEvent = new DiscordToMinecraftChatRelayEvent(
+                event.getAuthor().getId(), event.getChannel().getId(), authorName, relayedMessage);
+        Bukkit.getPluginManager().callEvent(relayEvent);
+        if (relayEvent.isCancelled()) {
+            return;
+        }
+        String deliveredMessage = sanitizeForMinecraft(relayEvent.message());
+        if (deliveredMessage.isBlank()) {
+            return;
+        }
+        String formatted = formatIngameRelayMessage(authorName, deliveredMessage);
         BukkitFutures.runSync(plugin, () -> plugin.getServer().broadcastMessage(formatted));
     }
 
@@ -670,15 +794,29 @@ public final class DiscordBotManager extends ListenerAdapter {
                 queuedMessage.avatarUrl(),
                 buildMinecraftAvatarUrl(queuedMessage.playerUuid(), queuedMessage.playerName())
         );
-        return sendRelayMessage(channel, username, avatarUrl, queuedMessage.message())
-                .thenCompose(ignored -> BukkitFutures.supplyAsync(plugin, () -> {
-                    try {
-                        linkService.repository().deleteQueuedChatRelayMessage(queuedMessage.id());
-                        return null;
-                    } catch (Exception exception) {
-                        throw new RuntimeException(exception);
-                    }
-                }));
+        return BukkitFutures.supplyAsync(plugin, () -> {
+            MinecraftToDiscordChatRelayEvent relayEvent = new MinecraftToDiscordChatRelayEvent(
+                    queuedMessage.playerUuid(), queuedMessage.playerName(), queuedMessage.message(), true);
+            Bukkit.getPluginManager().callEvent(relayEvent);
+            return relayEvent.isCancelled() ? "" : sanitizeMinecraftToDiscord(relayEvent.message());
+        }).thenCompose(content -> {
+            if (content.isBlank()) {
+                return deleteQueuedChatRelayMessage(queuedMessage.id());
+            }
+            return sendRelayMessage(channel, username, avatarUrl, content)
+                    .thenCompose(ignored -> deleteQueuedChatRelayMessage(queuedMessage.id()));
+        });
+    }
+
+    private CompletableFuture<Void> deleteQueuedChatRelayMessage(long id) {
+        return BukkitFutures.supplyAsync(plugin, () -> {
+            try {
+                linkService.repository().deleteQueuedChatRelayMessage(id);
+                return null;
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        });
     }
 
     private CompletableFuture<Void> postWebhookMessage(

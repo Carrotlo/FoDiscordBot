@@ -758,15 +758,28 @@ public final class LinkRepository {
     }
 
     public UnlinkResult unlinkPlayer(UUID playerUuid, String playerName, Instant now) throws SQLException {
+        return unlinkPlayer(playerUuid, playerName, now, null);
+    }
+
+    public UnlinkResult unlinkPlayer(UUID playerUuid, String playerName, Instant now, String expectedDiscordUserId) throws SQLException {
         try (Connection connection = openConnection()) {
             connection.setAutoCommit(false);
             try {
                 LinkedAccount currentState = getLinkedAccount(connection, playerUuid).orElse(null);
                 if (currentState == null || !currentState.isLinked()) {
+                    if (expectedDiscordUserId != null) {
+                        connection.rollback();
+                        return new UnlinkResult(UnlinkResult.Status.NOT_LINKED, null);
+                    }
                     upsertPlayerSnapshot(connection, playerUuid, playerName, now);
                     deletePendingCodeForPlayer(connection, playerUuid);
                     connection.commit();
                     return new UnlinkResult(UnlinkResult.Status.NOT_LINKED, currentState);
+                }
+
+                if (expectedDiscordUserId != null && !expectedDiscordUserId.equals(currentState.discordUserId())) {
+                    connection.rollback();
+                    return new UnlinkResult(UnlinkResult.Status.NOT_LINKED, null);
                 }
 
                 try (PreparedStatement statement = connection.prepareStatement("""
@@ -776,12 +789,16 @@ public final class LinkRepository {
                             discord_username = NULL,
                             discord_display_name = NULL,
                             updated_at = ?
-                        WHERE player_uuid = ?
+                        WHERE player_uuid = ? AND discord_user_id = ?
                         """)) {
                     statement.setString(1, playerName);
                     statement.setLong(2, now.getEpochSecond());
                     statement.setString(3, playerUuid.toString());
-                    statement.executeUpdate();
+                    statement.setString(4, currentState.discordUserId());
+                    if (statement.executeUpdate() == 0) {
+                        connection.rollback();
+                        return new UnlinkResult(UnlinkResult.Status.NOT_LINKED, null);
+                    }
                 }
 
                 deletePendingCodeForPlayer(connection, playerUuid);

@@ -31,7 +31,8 @@ public final class ChatRelayListener implements Listener {
         plugin.getDiscordBotManager().relayMinecraftChat(
                 event.getPlayer().getUniqueId(),
                 event.getPlayer().getName(),
-                message
+                message,
+                event.isAsynchronous()
         );
     }
 }

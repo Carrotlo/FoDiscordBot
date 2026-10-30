@@ -15,9 +15,14 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CompletionException;
 import me.foesio.core.command.CommandPlaceholders;
 import me.foesio.core.number.TickDuration;
 import me.foesio.foDiscordBot.FoDiscordBot;
+import me.foesio.foDiscordBot.api.event.AccountChangeCause;
+import me.foesio.foDiscordBot.api.event.AccountLinkedEvent;
+import me.foesio.foDiscordBot.api.event.AccountUnlinkedEvent;
+import me.foesio.foDiscordBot.api.event.LinkRewardResultEvent;
 import me.foesio.foDiscordBot.model.DiscordUserSnapshot;
 import me.foesio.foDiscordBot.model.LinkCompletionResult;
 import me.foesio.foDiscordBot.model.LinkedAccount;
@@ -123,11 +128,14 @@ public final class LinkService {
             CompletableFuture<Void> boosterUpdate = plugin.getBoosterService() == null
                     ? CompletableFuture.completedFuture(null)
                     : plugin.getBoosterService().markLinkBroken(account, gamemodeId);
-            return linkRewards.thenCompose(ignored -> boosterUpdate);
-        }).thenCompose(ignored -> BukkitFutures.supplyAsync(plugin, () -> {
+            return linkRewards.thenCompose(ignored -> boosterUpdate).thenApply(ignored -> account);
+        }).thenCompose(account -> BukkitFutures.supplyAsync(plugin, () -> {
             try {
-                UnlinkResult unlinkResult = repository.unlinkPlayer(player.getUniqueId(), player.getName(), Instant.now());
+                UnlinkResult unlinkResult = repository.unlinkPlayer(player.getUniqueId(), player.getName(), Instant.now(),
+                        account == null ? null : account.discordUserId());
                 if (unlinkResult.status() == UnlinkResult.Status.SUCCESS) {
+                    IntegrationEventDispatcher.firePostEvent(plugin, new AccountUnlinkedEvent(
+                            PublicApiService.identity(unlinkResult.account()), AccountChangeCause.MINECRAFT_COMMAND));
                     removeLinkedRole(unlinkResult.account());
                 }
                 return switch (unlinkResult.status()) {
@@ -141,28 +149,43 @@ public final class LinkService {
     }
 
     public CompletableFuture<DiscordLinkResponse> completeDiscordLink(String code, User user) {
-        Instant now = Instant.now();
-        Duration remaining = getRemainingCooldown(discordCooldowns, user.getId(), plugin.getPluginConfig().discordCommandCooldown(), now);
-        if (!remaining.isZero() && !remaining.isNegative()) {
-            return CompletableFuture.completedFuture(new DiscordLinkResponse(DiscordLinkStatus.COOLDOWN, null, remaining));
-        }
+        return completeDiscordLink(code, user, AccountChangeCause.DISCORD_COMMAND);
+    }
 
-        discordCooldowns.put(user.getId(), now);
+    public CompletableFuture<DiscordLinkResponse> completeDiscordLink(String code, User user, AccountChangeCause cause) {
         DiscordUserSnapshot snapshot = new DiscordUserSnapshot(
                 user.getId(),
                 user.getName(),
                 user.getGlobalName() != null ? user.getGlobalName() : user.getName(),
                 user.getAsMention()
         );
+        return completeLink(code, snapshot, cause);
+    }
+
+    public CompletableFuture<DiscordLinkResponse> completeLink(String code, DiscordUserSnapshot snapshot, AccountChangeCause cause) {
+        Instant now = Instant.now();
+        Duration remaining = getRemainingCooldown(discordCooldowns, snapshot.userId(), plugin.getPluginConfig().discordCommandCooldown(), now);
+        if (!remaining.isZero() && !remaining.isNegative()) {
+            return CompletableFuture.completedFuture(new DiscordLinkResponse(DiscordLinkStatus.COOLDOWN, null, remaining));
+        }
+
+        discordCooldowns.put(snapshot.userId(), now);
 
         return BukkitFutures.supplyAsync(plugin, () -> {
             try {
-                return repository.completeLink(code.trim().toUpperCase(), snapshot, Instant.now(), plugin.getPluginConfig().linkOneTimeRewardCommands());
+                return repository.completeLink(code.trim().toUpperCase(), snapshot,
+                        Instant.now(), plugin.getPluginConfig().linkOneTimeRewardCommands());
             } catch (Exception exception) {
-                discordCooldowns.remove(user.getId());
+                discordCooldowns.remove(snapshot.userId());
                 throw new RuntimeException(exception);
             }
-        }).thenApply(result -> {
+        }).thenCompose(result -> BukkitFutures.supplyAsync(plugin, () -> {
+            if (result.status() == LinkCompletionResult.Status.SUCCESS) {
+                IntegrationEventDispatcher.firePostEvent(plugin, new AccountLinkedEvent(
+                        PublicApiService.identity(result.account()), cause));
+            }
+            return result;
+        })).thenApply(result -> {
             DiscordLinkResponse response = mapDiscordResult(result);
             if (response.status() == DiscordLinkStatus.SUCCESS) {
                 addLinkedRole(response.account());
@@ -192,8 +215,11 @@ public final class LinkService {
                     : plugin.getBoosterService().markLinkBroken(account, gamemodeId);
             return linkRewards.thenCompose(ignored -> boosterUpdate).thenCompose(ignored -> BukkitFutures.supplyAsync(plugin, () -> {
                 try {
-                    UnlinkResult unlinkResult = repository.unlinkPlayer(account.playerUuid(), account.playerName(), Instant.now());
+                    UnlinkResult unlinkResult = repository.unlinkPlayer(account.playerUuid(), account.playerName(),
+                            Instant.now(), account.discordUserId());
                     if (unlinkResult.status() == UnlinkResult.Status.SUCCESS) {
+                        IntegrationEventDispatcher.firePostEvent(plugin, new AccountUnlinkedEvent(
+                                PublicApiService.identity(unlinkResult.account()), AccountChangeCause.DISCORD_COMMAND));
                         removeLinkedRole(unlinkResult.account());
                         notifyOnlineUnlinked(unlinkResult.account());
                         return new DiscordUnlinkResponse(DiscordUnlinkStatus.SUCCESS, unlinkResult.account());
@@ -206,6 +232,53 @@ public final class LinkService {
         });
     }
 
+    public CompletableFuture<UnlinkResult> unlinkExternallyByPlayer(UUID playerUuid) {
+        return BukkitFutures.supplyAsync(plugin, () -> {
+            try {
+                return repository.findByPlayerUuid(playerUuid).filter(LinkedAccount::isLinked).orElse(null);
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }).thenCompose(this::unlinkExternally);
+    }
+
+    public CompletableFuture<UnlinkResult> unlinkExternallyByDiscordId(String discordUserId) {
+        return BukkitFutures.supplyAsync(plugin, () -> {
+            try {
+                return repository.findLinkedByDiscordId(discordUserId).filter(LinkedAccount::isLinked).orElse(null);
+            } catch (Exception exception) {
+                throw new RuntimeException(exception);
+            }
+        }).thenCompose(this::unlinkExternally);
+    }
+
+    private CompletableFuture<UnlinkResult> unlinkExternally(LinkedAccount account) {
+        if (account == null) {
+            return CompletableFuture.completedFuture(new UnlinkResult(UnlinkResult.Status.NOT_LINKED, null));
+        }
+        String gamemodeId = plugin.getPluginConfig().normalizedGamemodeId();
+        CompletableFuture<Void> linkRewards = processUnlinkRewards(account, gamemodeId);
+        CompletableFuture<Void> boosterUpdate = plugin.getBoosterService() == null
+                ? CompletableFuture.completedFuture(null)
+                : plugin.getBoosterService().markLinkBroken(account, gamemodeId);
+        return linkRewards.thenCompose(ignored -> boosterUpdate)
+                .thenCompose(ignored -> BukkitFutures.supplyAsync(plugin, () -> {
+                    try {
+                        UnlinkResult result = repository.unlinkPlayer(account.playerUuid(), account.playerName(),
+                                Instant.now(), account.discordUserId());
+                        if (result.status() == UnlinkResult.Status.SUCCESS) {
+                            IntegrationEventDispatcher.firePostEvent(plugin, new AccountUnlinkedEvent(
+                                    PublicApiService.identity(result.account()), AccountChangeCause.API));
+                            removeLinkedRole(result.account());
+                            notifyOnlineUnlinked(result.account());
+                        }
+                        return result;
+                    } catch (Exception exception) {
+                        throw new RuntimeException(exception);
+                    }
+                }));
+    }
+
     public CompletableFuture<LinkRewardResponse> claimGamemodeReward(Player player) {
         String gamemodeId = plugin.getPluginConfig().normalizedGamemodeId();
         String lockKey = player.getUniqueId() + "|" + gamemodeId;
@@ -215,6 +288,18 @@ public final class LinkService {
 
         return BukkitFutures.supplyAsync(plugin, () -> loadLinkAction(player, gamemodeId))
                 .thenCompose(action -> applyLinkAction(action, gamemodeId))
+                .handle((response, failure) -> BukkitFutures.supplyAsync(plugin, () -> {
+                    if (failure != null || response.status() == LinkRewardStatus.SUCCESS
+                            || response.status() == LinkRewardStatus.FAILED) {
+                        IntegrationEventDispatcher.firePostEvent(plugin, new LinkRewardResultEvent(player.getUniqueId(), gamemodeId,
+                                failure == null && response.status() == LinkRewardStatus.SUCCESS
+                                        ? LinkRewardResultEvent.Result.GRANTED : LinkRewardResultEvent.Result.FAILED));
+                    }
+                    if (failure != null) {
+                        throw new CompletionException(failure);
+                    }
+                    return response;
+                })).thenCompose(future -> future)
                 .whenComplete((ignored, throwable) -> rewardDispatchInProgress.remove(lockKey));
     }
 

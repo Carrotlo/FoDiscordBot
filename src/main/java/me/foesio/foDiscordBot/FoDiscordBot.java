@@ -18,6 +18,7 @@ import me.foesio.core.sound.FoSoundService;
 import me.foesio.core.update.UpdateNoticeService;
 import me.foesio.foDiscordBot.api.DatabaseAction;
 import me.foesio.foDiscordBot.api.FoDiscordBotAddon;
+import me.foesio.foDiscordBot.api.FoDiscordBotApi;
 import me.foesio.foDiscordBot.command.DiscordCommand;
 import me.foesio.foDiscordBot.command.FoDiscordCommand;
 import me.foesio.foDiscordBot.command.LinkCommand;
@@ -33,6 +34,7 @@ import me.foesio.foDiscordBot.service.LinkRepository;
 import me.foesio.foDiscordBot.service.LinkService;
 import me.foesio.foDiscordBot.service.NetworkSyncService;
 import me.foesio.foDiscordBot.service.ProfileService;
+import me.foesio.foDiscordBot.service.PublicApiService;
 import me.foesio.foDiscordBot.service.RankSyncService;
 import me.foesio.foDiscordBot.service.SkinAvatarService;
 import org.bukkit.command.PluginCommand;
@@ -40,6 +42,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.event.HandlerList;
 
 import java.io.InputStream;
@@ -109,6 +112,7 @@ public final class FoDiscordBot extends JavaPlugin {
     private NetworkSyncService networkSyncService;
     private BoosterService boosterService;
     private RankSyncService rankSyncService;
+    private PublicApiService publicApiService;
     private SkinAvatarService skinAvatarService;
     private FoCoreContext core;
     private FoSoundService sounds;
@@ -152,6 +156,8 @@ public final class FoDiscordBot extends JavaPlugin {
             this.networkSyncService = new NetworkSyncService(this, profileService, leaderboardService);
             this.boosterService = new BoosterService(this, linkRepository);
             this.rankSyncService = new RankSyncService(this, linkRepository);
+            this.publicApiService = new PublicApiService(this, linkRepository);
+            getServer().getServicesManager().register(FoDiscordBotApi.class, publicApiService, this, ServicePriority.Normal);
 
             registerCommands();
             getServer().getPluginManager().registerEvents(new PlayerActivityListener(this), this);
@@ -171,6 +177,7 @@ public final class FoDiscordBot extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        getServer().getServicesManager().unregisterAll(this);
         if (commandVisibilityService != null) {
             commandVisibilityService.close();
             commandVisibilityService = null;
